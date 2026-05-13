@@ -14,7 +14,7 @@ except ImportError:
 
 # Default settings
 BAUDRATE    = 1000000
-DEVICENAME  = 'COM1'            # Change to your COM port
+DEVICENAME  = '/dev/ttyUSB0'            # Change to your COM port
 MOTOR_ID    = 1
 
 # EEPROM / RAM Addresses (STS/SCS series typically)

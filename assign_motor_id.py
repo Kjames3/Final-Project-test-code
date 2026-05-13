@@ -13,7 +13,7 @@ except ImportError:
 
 # Default setting
 BAUDRATE    = 1000000           # Default baudrate for STS/SCS servos
-DEVICENAME  = 'COM1'            # Change to your COM port (e.g. '/dev/ttyUSB0' for Linux)
+DEVICENAME  = '/dev/ttyUSB0'            # Change to your COM port (e.g. '/dev/ttyUSB0' for Linux)
 
 ADDR_ID     = 5                 # EEPROM Address for ID
 ADDR_LOCK   = 48                # EEPROM Address for Lock
