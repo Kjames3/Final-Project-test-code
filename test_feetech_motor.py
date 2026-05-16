@@ -14,7 +14,13 @@ except ImportError:
 
 # Default settings
 BAUDRATE    = 1000000
-DEVICENAME  = '/dev/ttyUSB0'            # Change to your COM port
+
+if sys.platform == 'win32':
+    DEVICENAME = 'COM1'             # Change to your COM port
+elif sys.platform == 'darwin':
+    DEVICENAME = '/dev/tty.usbserial'
+else:
+    DEVICENAME = '/dev/ttyUSB0'     # Change to your COM port
 MOTOR_ID    = 1
 
 # EEPROM / RAM Addresses (STS/SCS series typically)
