@@ -1,57 +1,64 @@
 # Final Project Test Code
 
-This repository contains test scripts used to verify and configure the hardware for an auto-balancing robot. The hardware consists of:
-- **Hip Motors:** Feetech 12V 30kg Servo Motors
-- **Wheel Motors:** JGB-520 12V 550 RPM DC Motors
+Hip-motor control for the auto-balancing robot. You give an angle, the Feetech serial-bus servos go there.
 
-## Scripts Overview
+- **Hip motors:** Feetech 12V 30kg STS-series serial-bus servos
+- **Compute:** developed on a laptop, executed on a Raspberry Pi
 
-### 1. `test_feetech_motor.py`
-This script is used to test the Feetech 12V 30kg servo motors that act as the robot's hips. 
-It uses the `scservo_sdk` to communicate with the motor via a serial COM port.
+## Layout
 
-**Behavior:**
-It continuously cycles the motor through the following sequence until interrupted:
-- Move to 90 degrees clockwise (+90 deg)
-- Move to center (0 deg)
-- Move to 90 degrees counter-clockwise (-90 deg)
-- Move to center (0 deg)
+```
+Final-Project-test-code/
+├── README.md
+├── requirements.txt
+├── config/
+│   └── robot.yaml          # serial port, hip motor IDs, per-side offsets/limits
+├── src/
+│   ├── drivers/
+│   │   └── feetech_servo.py    # wraps scservo_sdk; set_angle/read_angle in radians
+│   └── utils/
+│       └── config.py       # YAML loader, platform-aware serial-port default
+├── scripts/
+│   ├── set_hip_angles.py       # command both hips to absolute angles
+│   ├── test_feetech_motor.py   # cycle one hip through ±90° (bring-up)
+│   └── assign_motor_id.py      # change a servo's bus ID (one servo at a time)
+└── Documents/
+```
 
-**How to use:**
-1. Ensure the motor is connected to your computer via a serial controller (e.g., Fe-URT-2).
-2. Run the script: `python test_feetech_motor.py`
-3. Enter your COM port (e.g., `COM1` or `/dev/ttyUSB0`) when prompted, or press Enter to use the default.
-4. Enter the current ID of the servo motor (default is 1).
-5. The test will begin. Press `ENTER` at any time to stop the test and return the motor to the center position.
+## Install (once per Pi)
 
-### 2. `assign_motor_id.py`
-Since multiple Feetech servo motors can be daisy-chained on the same serial bus, each must have a unique ID. This script allows you to reassign the ID of a Feetech servo motor.
+```bash
+pip install -r requirements.txt
+```
 
-**How to use:**
-1. **Connect ONLY ONE servo motor** to the serial controller at a time to prevent ID conflicts during reassignment.
-2. Run the script: `python assign_motor_id.py`
-3. Enter your COM port.
-4. Enter the current servo ID.
-5. Enter the new desired servo ID.
-6. The script will unlock the EEPROM, write the new ID, and lock the EEPROM again.
-7. **Important:** After the script completes successfully, power cycle the servo (disconnect and reconnect power) for the new ID to take effect.
+The Feetech Python SDK is published as **`ftservo-python-sdk`** (the import name `scservo_sdk` does not exist on PyPI under that name — `pip install scservo_sdk` will fail).
 
-### 3. `test_jgb_motors.py`
-This script tests the JGB-520 DC motors used for the robot's wheels. It is designed to run on a Raspberry Pi using the `RPi.GPIO` library to generate PWM signals for a motor driver.
+## First-time bring-up
 
-**Behavior:**
-It drives four motor driver channels (representing two or four motors depending on wiring) in a sequence:
-- Spin forward at 50% speed for 3 seconds
-- Pause for 0.5 seconds
-- Spin backward at 50% speed for 3 seconds
-- Pause for 0.5 seconds
-- Repeat
+Each Feetech servo ships with **ID 1**. To control two on one bus they need distinct IDs — do this once per servo, **with only one servo plugged in at a time**:
 
-**How to use:**
-1. Ensure you are running this on a Raspberry Pi with the motors correctly wired to the GPIO pins specified in the script (AIN1=17, AIN2=18, BIN1=22, BIN2=23).
-2. Run the script: `python test_jgb_motors.py` (or `sudo python3 test_jgb_motors.py` if permissions are required for GPIO).
-3. The motors will begin their sequence. Press `ENTER` at any time to gracefully stop the test, stop the motors, and clean up the GPIO pins.
+```bash
+python scripts/assign_motor_id.py        # plug in left or right hip  
+```
 
-## Dependencies
-- For Feetech scripts (`test_feetech_motor.py`, `assign_motor_id.py`): You need the `scservo_sdk`. You can install it via `pip install scservo_sdk` or download it from [Feetech's GitHub](https://github.com/cv-core/feetech_scservo_sdk).
-- For the JGB motor script (`test_jgb_motors.py`): You need `RPi.GPIO` installed on your Raspberry Pi.
+Then verify each one cycles correctly:
+
+```bash
+python scripts/test_feetech_motor.py     # prompts for port + ID, cycles ±90° until ENTER
+```
+
+The IDs the scripts assume live in [config/robot.yaml](config/robot.yaml) under `hips.left.id` / `hips.right.id` — change those if you used different numbers.
+
+## Running
+
+Plug both hip servos into the bus, then:
+
+```bash
+python scripts/set_hip_angles.py 0 0                  # both hips to center (radians)
+python scripts/set_hip_angles.py 0.7854 -0.7854       # left +45°, right -45° (radians)
+python scripts/set_hip_angles.py 45 -45 --deg         # same, in degrees
+python scripts/set_hip_angles.py 0 0 --port /dev/ttyUSB1
+```
+
+Per-side direction signs, offsets, and joint limits also live in [config/robot.yaml](config/robot.yaml).
+

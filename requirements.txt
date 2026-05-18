@@ -1,0 +1,2 @@
+pyyaml>=6.0
+ftservo-python-sdk   # provides the `scservo_sdk` import; the import name is NOT on PyPI
