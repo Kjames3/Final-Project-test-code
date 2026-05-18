@@ -20,7 +20,7 @@ if sys.platform == 'win32':
 elif sys.platform == 'darwin':
     DEVICENAME = '/dev/tty.usbserial'
 else:
-    DEVICENAME = '/dev/ttyUSB0'     # Change to your COM port
+    DEVICENAME = '/dev/ttyACM0'     # Change to your COM port
 MOTOR_ID    = 1
 
 # EEPROM / RAM Addresses (STS/SCS series typically)

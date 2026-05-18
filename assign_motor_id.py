@@ -19,7 +19,7 @@ if sys.platform == 'win32':
 elif sys.platform == 'darwin':
     DEVICENAME = '/dev/tty.usbserial'
 else:
-    DEVICENAME = '/dev/ttyUSB0'     # Change to your COM port (e.g. '/dev/ttyUSB0' for Linux)
+    DEVICENAME = '/dev/ttyACM0'     # Change to your COM port (e.g. '/dev/ttyACM0' or '/dev/ttyUSB0' for Linux)
 
 ADDR_ID     = 5                 # EEPROM Address for ID
 ADDR_LOCK   = 48                # EEPROM Address for Lock
