@@ -8,7 +8,7 @@ try:
     from scservo_sdk import *
 except ImportError:
     print("Error: scservo_sdk not found. Please ensure the SDK is installed or accessible.")
-    print("Download from: https://github.com/cv-core/feetech_scservo_sdk or similar.")
+    print("You can install it with: pip3 install ftservo-python-sdk --break-system-packages")
     sys.exit(1)
 
 # Default setting
@@ -33,9 +33,9 @@ def assign_id():
         print("Invalid input. IDs must be integers.")
         return
 
-    # Initialize PortHandler and PacketHandler
+    # Initialize PortHandler and Servo Handler
     portHandler = PortHandler(port_name)
-    packetHandler = PacketHandler(1) # Protocol version 1 is usually used for Feetech
+    packetHandler = sms_sts(portHandler)
 
     # Open port
     if portHandler.openPort():
@@ -55,7 +55,7 @@ def assign_id():
     print(f"\nAssigning new ID {new_id} to servo currently at ID {old_id}...")
 
     # 1. Unlock EEPROM (write 0 to ADDR_LOCK)
-    scs_comm_result, scs_error = packetHandler.write1ByteTxRx(portHandler, old_id, ADDR_LOCK, 0)
+    scs_comm_result, scs_error = packetHandler.write1ByteTxRx(old_id, ADDR_LOCK, 0)
     if scs_comm_result != COMM_SUCCESS:
         print(f"Failed to unlock EEPROM: {packetHandler.getTxRxResult(scs_comm_result)}")
         portHandler.closePort()
@@ -64,7 +64,7 @@ def assign_id():
         print(f"Error unlocking: {packetHandler.getRxPacketError(scs_error)}")
 
     # 2. Write new ID (write to ADDR_ID)
-    scs_comm_result, scs_error = packetHandler.write1ByteTxRx(portHandler, old_id, ADDR_ID, new_id)
+    scs_comm_result, scs_error = packetHandler.write1ByteTxRx(old_id, ADDR_ID, new_id)
     if scs_comm_result != COMM_SUCCESS:
         print(f"Failed to write new ID: {packetHandler.getTxRxResult(scs_comm_result)}")
     elif scs_error != 0:
@@ -74,7 +74,7 @@ def assign_id():
 
     # 3. Lock EEPROM (write 1 to ADDR_LOCK)
     # Note: Address lock with the *new* ID because the ID has already changed in memory
-    scs_comm_result, scs_error = packetHandler.write1ByteTxRx(portHandler, new_id, ADDR_LOCK, 1)
+    scs_comm_result, scs_error = packetHandler.write1ByteTxRx(new_id, ADDR_LOCK, 1)
     if scs_comm_result != COMM_SUCCESS:
         print(f"Failed to lock EEPROM: {packetHandler.getTxRxResult(scs_comm_result)}")
     elif scs_error != 0:

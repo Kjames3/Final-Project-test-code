@@ -9,7 +9,7 @@ try:
     from scservo_sdk import *
 except ImportError:
     print("Error: scservo_sdk not found. Please ensure the SDK is installed or accessible.")
-    print("Download from: https://github.com/cv-core/feetech_scservo_sdk or similar.")
+    print("You can install it with: pip3 install ftservo-python-sdk --break-system-packages")
     sys.exit(1)
 
 # Default settings
@@ -48,9 +48,9 @@ def test_motor():
         print("Invalid input. ID must be an integer.")
         return
 
-    # Initialize PortHandler and PacketHandler
+    # Initialize PortHandler and Servo handler
     portHandler = PortHandler(port_name)
-    packetHandler = PacketHandler(1)
+    packetHandler = sms_sts(portHandler)
 
     # Open port
     if not portHandler.openPort():
@@ -85,7 +85,7 @@ def test_motor():
                 
                 print(f"Moving to: {name} (Position Value: {pos})")
                 # Write goal position (2 bytes for position on Feetech servos)
-                scs_comm_result, scs_error = packetHandler.write2ByteTxRx(portHandler, motor_id, ADDR_GOAL_POSITION, pos)
+                scs_comm_result, scs_error = packetHandler.write2ByteTxRx(motor_id, ADDR_GOAL_POSITION, pos)
                 
                 if scs_comm_result != COMM_SUCCESS:
                     print(f"Communication Error: {packetHandler.getTxRxResult(scs_comm_result)}")
@@ -101,7 +101,7 @@ def test_motor():
 
     # Always return to center before exiting
     print("\nReturning motor to center (0 degrees)...")
-    packetHandler.write2ByteTxRx(portHandler, motor_id, ADDR_GOAL_POSITION, POS_CENTER)
+    packetHandler.write2ByteTxRx(motor_id, ADDR_GOAL_POSITION, POS_CENTER)
     time.sleep(1.0)
     
     portHandler.closePort()
