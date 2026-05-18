@@ -1,10 +1,5 @@
 # Final Project Test Code
 
-Hip-motor control for the auto-balancing robot. You give an angle, the Feetech serial-bus servos go there.
-
-- **Hip motors:** Feetech 12V 30kg STS-series serial-bus servos
-- **Compute:** developed on a laptop, executed on a Raspberry Pi
-
 ## Layout
 
 ```
