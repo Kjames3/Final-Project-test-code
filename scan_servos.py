@@ -2,11 +2,11 @@ import sys
 import time
 from scservo_sdk import *
 
-port_name = '/dev/ttyUSB0'
+port_name = '/dev/ttyACM0'
 baudrates = [1000000, 500000, 115200, 57600, 38400]
 
 portHandler = PortHandler(port_name)
-packetHandler = PacketHandler(1)
+packetHandler = sms_sts(portHandler)
 
 if not portHandler.openPort():
     print(f"Failed to open port {port_name}")
@@ -22,7 +22,7 @@ for baud in baudrates:
     # Scan all IDs
     for test_id in range(0, 254):
         # send ping
-        scs_model_number, scs_comm_result, scs_error = packetHandler.ping(portHandler, test_id)
+        scs_model_number, scs_comm_result, scs_error = packetHandler.ping(test_id)
         if scs_comm_result == COMM_SUCCESS:
             print(f"*** FOUND SERVO! ID: {test_id} at Baudrate: {baud} ***")
             found = True
