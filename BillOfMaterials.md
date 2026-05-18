@@ -12,7 +12,13 @@
 | 1x | Yahboom 2-channel motor controller YB-MNT03-v1.0 | Used to control the wheel motors |
 | 1x | UBEC 5V 5A Voltage Regulator | Steps down voltage to 5V |
 | 1x | 12V 6000mAh Lithium Ion Battery | Primary power source (Backup: 9600mAh battery available) |
-| 1x | MPU6050 IMU 6-axis | Inertial measurement unit |
+| 1x | MPU9250 IMU 9-axis | Inertial measurement unit |
+| 1x | MPU6050 IMU 6-axis | Inertial measurement unit (backup plan) |
+| 2x | YYB24070402 IIC OLED Display | Used for debugging and IP address display |
+| 1x | USB-C Cable | Used to power the Arduino |
+| 4x | Jumper Wires (Female-Female) | Used to connect the IMU to the Arduino |
+| 4x | Jumper Wires (Female-Male) | Used to connect the motor controller to the Arduino |
+| 4x | Jumper Wires (Male-Male) | Used to connect the OLED display to the Arduino |
 
 ## Hardware
 
