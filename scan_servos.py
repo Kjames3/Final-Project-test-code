@@ -26,7 +26,6 @@ for baud in baudrates:
         if scs_comm_result == COMM_SUCCESS:
             print(f"*** FOUND SERVO! ID: {test_id} at Baudrate: {baud} ***")
             found = True
-            break
     if found:
         break
 
