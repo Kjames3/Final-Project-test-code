@@ -1,57 +1,90 @@
-# Final Project Test Code
+# Jumping Wheel-Legged Robot — EE 244 Final Project
 
-This repository contains test scripts used to verify and configure the hardware for an auto-balancing robot. The hardware consists of:
-- **Hip Motors:** Feetech 12V 30kg Servo Motors
-- **Wheel Motors:** JGB-520 12V 550 RPM DC Motors
+This repository contains the software verification, hardware calibration, and operational scripts for our double-wheel parallel four-bar linkage jumping robot.
 
-## Scripts Overview
+---
 
-### 1. `test_feetech_motor.py`
-This script is used to test the Feetech 12V 30kg servo motors that act as the robot's hips. 
-It uses the `scservo_sdk` to communicate with the motor via a serial COM port.
+## 👥 Team Members
+* **Kamren James**
+* **Shashwat Hitesh Shah**
+* **Bhargav Srikanta Prasad Hoskote**
+* **Jaya Surya Varma Pelluri**
 
-**Behavior:**
-It continuously cycles the motor through the following sequence until interrupted:
-- Move to 90 degrees clockwise (+90 deg)
-- Move to center (0 deg)
-- Move to 90 degrees counter-clockwise (-90 deg)
-- Move to center (0 deg)
+---
 
-**How to use:**
-1. Ensure the motor is connected to your computer via a serial controller (e.g., Fe-URT-2).
-2. Run the script: `python test_feetech_motor.py`
-3. Enter your COM port (e.g., `COM1` or `/dev/ttyUSB0`) when prompted, or press Enter to use the default.
-4. Enter the current ID of the servo motor (default is 1).
-5. The test will begin. Press `ENTER` at any time to stop the test and return the motor to the center position.
+## 🎯 Project Objective & Inspiration
+Our goal is to design, construct, and program a double-wheeled parallel-linkage robot that can stably balance on flat terrain and dynamically contract/expand its legs to jump over obstacles.
 
-### 2. `assign_motor_id.py`
-Since multiple Feetech servo motors can be daisy-chained on the same serial bus, each must have a unique ID. This script allows you to reassign the ID of a Feetech servo motor.
+We aim to **emulate the physical results and dynamic control systems** described in the research paper:
+> **"Design and dynamic analysis of jumping wheel-legged robot in complex terrain environment"**
+> *Frontiers in Neurorobotics (2022) | DOI: 10.3389/fnbot.2022.1066714*
+> *(Accessible at: [Documents/fnbot-16-1066714 (1).pdf](file:///home/kamren/Final-Project-test-code/Documents/fnbot-16-1066714%20(1).pdf))*
 
-**How to use:**
-1. **Connect ONLY ONE servo motor** to the serial controller at a time to prevent ID conflicts during reassignment.
-2. Run the script: `python assign_motor_id.py`
-3. Enter your COM port.
-4. Enter the current servo ID.
-5. Enter the new desired servo ID.
-6. The script will unlock the EEPROM, write the new ID, and lock the EEPROM again.
-7. **Important:** After the script completes successfully, power cycle the servo (disconnect and reconnect power) for the new ID to take effect.
+### Constraints & Scope
+* **Budget Limit:** **$120** (strictly enforced for structure, motors, drivers, and microcontrollers)
+* **Core Goal:** Build a working prototype leveraging parallel four-bar linkages, implementing a LQR self-balancing controller (on wheel motors) and dynamic height-changing/jumping mechanics (via hip serial bus servos).
 
-### 3. `test_jgb_motors.py`
-This script tests the JGB-520 DC motors used for the robot's wheels. It is designed to run on a Raspberry Pi using the `RPi.GPIO` library to generate PWM signals for a motor driver.
+---
 
-**Behavior:**
-It drives four motor driver channels (representing two or four motors depending on wiring) in a sequence:
-- Spin forward at 50% speed for 3 seconds
-- Pause for 0.5 seconds
-- Spin backward at 50% speed for 3 seconds
-- Pause for 0.5 seconds
-- Repeat
+## 🛠️ Hardware Specification Summary
 
-**How to use:**
-1. Ensure you are running this on a Raspberry Pi with the motors correctly wired to the GPIO pins specified in the script (AIN1=17, AIN2=18, BIN1=22, BIN2=23).
-2. Run the script: `python test_jgb_motors.py` (or `sudo python3 test_jgb_motors.py` if permissions are required for GPIO).
-3. The motors will begin their sequence. Press `ENTER` at any time to gracefully stop the test, stop the motors, and clean up the GPIO pins.
+Detailed wiring, schematic connections, and Pinout maps are maintained in [Assembly.md](file:///home/kamren/Final-Project-test-code/Assembly.md).
 
-## Dependencies
-- For Feetech scripts (`test_feetech_motor.py`, `assign_motor_id.py`): You need the `scservo_sdk`. You can install it via `pip install scservo_sdk` or download it from [Feetech's GitHub](https://github.com/cv-core/feetech_scservo_sdk).
-- For the JGB motor script (`test_jgb_motors.py`): You need `RPi.GPIO` installed on your Raspberry Pi.
+* **Hips (Leg Linkages):** 2x Feetech 12V 30kg Serial Bus Servos (STS3215)
+* **Wheels:** 2x JGB-520 12V 550 RPM DC Motors with Hall-effect encoders
+* **Controller:** Raspberry Pi (running Pi OS Lite / Bookworm)
+* **Network Status Display:** 1.3" IIC V2.2 OLED (SH1106 driver, 128x64px)
+
+---
+
+## 📂 Scripts & Codebase Guide
+
+### 1. `display_ip.py`
+A daemon script that drives the 1.3" I2C OLED screen. It queries the local system for the active Wi-Fi SSID, IP address (`wlan0`), and system hostname, updating the display every 5 seconds.
+* **Why it matters:** Allows team members to quickly check the Pi's IP address upon boot so anybody can SSH in and run scripts without needing to plug in an HDMI monitor or scan the network.
+* **How to run manually:** `python3 display_ip.py`
+* **Automated start:** Installed as a systemd service (`oled-display.service`).
+
+### 2. `Default_Stance.py`
+Commands the two high-torque Feetech hip joint servos to establish the robot's nominal, ready-to-stand posture.
+* **Safe Transitioning:** Automatically measures the current position of the hip servos. If they are already in stance (`M1 = 3902`, `M2 = 151` ± 80 steps), it locks torque in place. If they need to move, it warns the user and prompts for verification `[y/N]` before executing a slow, controlled direct-path rotation to prevent damaging the parallel four-bar linkage.
+* **How to run:** `python3 Default_Stance.py`
+
+### 3. `assign_motor_id.py`
+A utility script used to configure and permanently assign unique serial bus IDs to the Feetech servos (ID `1` for Left, ID `2` for Right).
+* **Fix for ID reset:** Uses EEPROM Lock Register `55` (specific to the Feetech SMS/STS series) to unlock the non-volatile memory, write the new ID, and re-lock it so the ID persists permanently across power cycles.
+
+### 4. `read_feetech_status.py`
+Queries the live position and rotational speed of a connected Feetech servo in real time. Extremely useful for verifying correct assembly and mapping physical leg positions to encoder counts.
+
+### 5. `test_jgb_motors.py`
+A basic hardware verification script that spins the wheel DC motors forward and backward via the GPIO hardware pins on the Raspberry Pi.
+
+---
+
+## 🚀 Quick Setup & Installation
+
+### A. Setup Python Dependencies
+On the Raspberry Pi, install all necessary system packages and libraries:
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-pip python3-pil fonts-dejavu-core i2c-tools
+
+# Install Feetech SDK & Luma OLED package
+pip3 install luma.oled ftservo-python-sdk --break-system-packages
+```
+
+### B. Auto-Start the OLED Service
+To ensure the Pi always shows its IP address when it boots up:
+1. Ensure the systemd service file is configured (check paths and username inside [oled-display.service](file:///home/kamren/Final-Project-test-code/oled-display.service)).
+2. Install and enable the service:
+   ```bash
+   sudo cp oled-display.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable oled-display
+   sudo systemctl start oled-display
+   ```
+3. Verify it is running properly:
+   ```bash
+   sudo systemctl status oled-display
+   ```
