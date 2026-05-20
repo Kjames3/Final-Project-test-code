@@ -20,3 +20,10 @@ hips:
     min_rad: -1.5708
     max_rad: 1.5708
 
+wheels:
+  encoder_ppr: 660
+  wheel_circumference_m: 0.065
+  max_speed_pwm: 180
+  max_turn_pwm: 80
+
+
