@@ -1,0 +1,29 @@
+[Unit]
+Description=OLED Network Info Display (WiFi SSID + SSH IP)
+Documentation=https://github.com/rm-hull/luma.oled
+# Wait for the network to be up before starting
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Change this path if you put display_ip.py somewhere else
+ExecStart=/usr/bin/python3 /home/pi/Final-Project-test-code/display_ip.py
+
+# Automatically restart if the script crashes
+Restart=on-failure
+RestartSec=10
+
+# Run as the 'pi' user so it can access I2C without sudo
+# Change to your actual username if it is not 'pi'
+User=pi
+Group=pi
+
+# Give the I2C bus time to be ready after boot
+ExecStartPre=/bin/sleep 5
+
+# Keep logs visible via: journalctl -u oled-display -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
