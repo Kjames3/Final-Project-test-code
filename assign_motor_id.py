@@ -22,7 +22,7 @@ else:
     DEVICENAME = '/dev/ttyACM0'     # Change to your COM port (e.g. '/dev/ttyACM0' or '/dev/ttyUSB0' for Linux)
 
 ADDR_ID     = 5                 # EEPROM Address for ID
-ADDR_LOCK   = 48                # EEPROM Address for Lock
+ADDR_LOCK   = 55                # EEPROM Address for Lock (55 for STS/SMS series, 48 for SCS series)
 
 def assign_id():
     port_name = input(f"Enter COM port (default {DEVICENAME}): ") or DEVICENAME
