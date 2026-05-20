@@ -12,7 +12,7 @@ This repository contains the software verification, hardware calibration, and op
 
 ---
 
-## 🎯 Project Objective & Inspiration
+## Project Objective & Inspiration
 Our goal is to design, construct, and program a double-wheeled parallel-linkage robot that can stably balance on flat terrain and dynamically contract/expand its legs to jump over obstacles.
 
 We aim to **emulate the physical results and dynamic control systems** described in the research paper:
@@ -26,7 +26,7 @@ We aim to **emulate the physical results and dynamic control systems** described
 
 ---
 
-## 🛠️ Hardware Specification Summary
+## Hardware Specification Summary
 
 Detailed wiring, schematic connections, and Pinout maps are maintained in [Assembly.md](file:///home/kamren/Final-Project-test-code/Assembly.md).
 
@@ -37,7 +37,7 @@ Detailed wiring, schematic connections, and Pinout maps are maintained in [Assem
 
 ---
 
-## 📂 Scripts & Codebase Guide
+## Scripts & Codebase Guide
 
 ### 1. `display_ip.py`
 A daemon script that drives the 1.3" I2C OLED screen. It queries the local system for the active Wi-Fi SSID, IP address (`wlan0`), and system hostname, updating the display every 5 seconds.
@@ -62,7 +62,7 @@ A basic hardware verification script that spins the wheel DC motors forward and 
 
 ---
 
-## 🚀 Quick Setup & Installation
+## Quick Setup & Installation
 
 ### A. Setup Python Dependencies
 On the Raspberry Pi, install all necessary system packages and libraries:
