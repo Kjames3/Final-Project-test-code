@@ -135,11 +135,29 @@ unsigned long prevSpeedMs  = 0;
 unsigned long prevSerialMs = 0;
 
 // ── ENCODER ISR ───────────────────────────────────────────────
-void IRAM_ATTR encL_ISR() {
+void encL_ISR() {
   // Count left encoder pulses (using A channel interrupt)
-  if (digitalRead(PIN_ENC_L_B) == LOW) encL++;
-  else                                  encL--;
+  if (digitalRead(PIN_ENC_L_A) == digitalRead(PIN_ENC_L_B)) {
+    encL++;
+  } else {
+    encL--;
+  }
 }
+
+// Right encoder Pin Change Interrupt vector (Port B: Pins 8 to 13)
+ISR(PCINT0_vect) {
+  static uint8_t lastState = LOW;
+  uint8_t stateA = digitalRead(PIN_ENC_R_A);
+  if (stateA != lastState) {
+    lastState = stateA;
+    if (stateA == digitalRead(PIN_ENC_R_B)) {
+      encR--; // Mirrored right wheel rotation direction
+    } else {
+      encR++;
+    }
+  }
+}
+
 
 // ── MPU6050 FUNCTIONS ─────────────────────────────────────────
 void mpuInit() {
@@ -378,6 +396,13 @@ void setup() {
   // Left encoder interrupt
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_L_A),
                   encL_ISR, CHANGE);
+
+  // Right encoder PCINT configuration (Pin 12 / PB4 / PCINT4)
+  cli();                  // Disable global interrupts while configuring
+  PCICR |= (1 << PCIE0);    // Enable Port B Pin Change Interrupt (PCIE0)
+  PCMSK0 |= (1 << PCINT4);  // Enable mask specifically for Pin 12 (PCINT4)
+  sei();                  // Re-enable interrupts
+
 
   // MPU6050
   mpuInit();
