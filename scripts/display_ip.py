@@ -9,24 +9,17 @@ Displays on the OLED:
   • Hostname
   • Connected Wi-Fi SSID
   • IP address (wlan0)
-
-Dependencies (install once on the Pi):
-  sudo apt-get install -y python3-pip python3-pil fonts-dejavu-core i2c-tools
-  pip3 install luma.oled
-
-Enable I2C on the Pi:
-  sudo raspi-config → Interfacing Options → I2C → Enable
 """
 
 import os
 import time
 import socket
 import subprocess
-import textwrap
+import _bootstrap  # noqa: F401
 
 from PIL import Image, ImageDraw, ImageFont
 from luma.core.interface.serial import i2c
-from luma.oled.device import sh1106  # SH1106 is the chip used by the 1.3" IIC V2.2
+from luma.oled.device import sh1106
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 I2C_PORT    = 1        # /dev/i2c-1  (standard on Pi 2/3/4/5)
@@ -54,7 +47,7 @@ def get_ip_address(iface: str = "wlan0") -> str:
 
 def get_wifi_ssid() -> str:
     """Return the SSID of the currently associated Wi-Fi network."""
-    # Method 1: nmcli (NetworkManager, available on most modern Pi OS builds)
+    # Method 1: nmcli (NetworkManager)
     try:
         result = subprocess.run(
             ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"],

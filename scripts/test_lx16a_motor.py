@@ -1,27 +1,30 @@
+#!/usr/bin/env python3
+"""
+test_lx16a_motor.py — LX-16A Serial Bus Servo Test (Modular)
+Centering and back-and-forth swing sequences using direct pyserial.
+"""
+
 import os
 import sys
 import time
 import threading
+import _bootstrap  # noqa: F401
 
-# We will use pyserial directly to avoid dependency issues with the lx16a pip package.
 try:
     import serial
 except ImportError:
-    print("Error: pyserial module not found. Please ensure it is installed.")
-    print("Install using: pip install pyserial")
+    print("Error: pyserial module not found. Install with: pip install pyserial")
     sys.exit(1)
 
 # Default settings
-DEVICENAME  = '/dev/ttyUSB0'            # Change to your COM port
-BAUDRATE    = 115200                    # LX-16A default baudrate
+DEVICENAME  = '/dev/ttyUSB0'
+BAUDRATE    = 115200
 MOTOR_ID    = 3
 
-# LX-16A servos use 0-1000 for 0-240 degrees.
-# Center (120 degrees) is 500.
-# 90 degrees is (1000 / 240) * 90 = 375 steps.
+# LX-16A servos use 0-1000 for 0-240 degrees. Center is 500.
 POS_CENTER = 500
-POS_CW_90  = POS_CENTER + 375   # 875
-POS_CCW_90 = POS_CENTER - 375   # 125
+POS_CW_90  = POS_CENTER + 375
+POS_CCW_90 = POS_CENTER - 375
 
 stop_event = threading.Event()
 
@@ -30,12 +33,7 @@ def wait_for_enter():
     stop_event.set()
 
 def move_lx16a(ser, servo_id, position, time_ms):
-    """
-    Sends a SERVO_MOVE_TIME_WRITE command to the LX-16A servo.
-    position: 0~1000
-    time_ms: 0~30000 ms
-    """
-    # Clamp values
+    """Sends a SERVO_MOVE_TIME_WRITE command to the LX-16A servo."""
     position = max(0, min(1000, int(position)))
     time_ms = max(0, min(30000, int(time_ms)))
     
@@ -47,13 +45,15 @@ def move_lx16a(ser, servo_id, position, time_ms):
     length = 7
     command = 1 # SERVO_MOVE_TIME_WRITE
     
-    # Checksum = ~ (ID + Length + Command + Prm1 + ... + PrmN)
     checksum = (~(servo_id + length + command + pos_l + pos_h + time_l + time_h)) & 0xFF
-    
     packet = [0x55, 0x55, servo_id, length, command, pos_l, pos_h, time_l, time_h, checksum]
     ser.write(bytes(packet))
 
 def test_motor():
+    print("\n  ===================================================")
+    print("    JUMPING WHEEL-LEGGED ROBOT — LX-16A Servo Test   ")
+    print("  ===================================================\n")
+
     port_name = input(f"Enter COM port (default {DEVICENAME}): ") or DEVICENAME
     try:
         motor_id = int(input(f"Enter servo ID (default {MOTOR_ID}): ") or MOTOR_ID)
@@ -61,7 +61,6 @@ def test_motor():
         print("Invalid input. ID must be an integer.")
         return
 
-    # Initialize port
     try:
         ser = serial.Serial(port_name, BAUDRATE, timeout=1)
     except Exception as e:
@@ -89,11 +88,7 @@ def test_motor():
                     break
                 
                 print(f"Moving to: {name} (Position Value: {pos})")
-                
-                # move 1000ms
                 move_lx16a(ser, motor_id, pos, 1000)
-                
-                # Wait for the motor to reach the position
                 time.sleep(1.5) 
                 
     except KeyboardInterrupt:

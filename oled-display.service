@@ -7,16 +7,15 @@ Wants=network-online.target
 
 [Service]
 # Change this path if you put display_ip.py somewhere else
-ExecStart=/usr/bin/python3 /home/pi/Final-Project-test-code/display_ip.py
+ExecStart=/usr/bin/python3 /home/kamren/Final-Project-test-code/scripts/display_ip.py
 
 # Automatically restart if the script crashes
 Restart=on-failure
 RestartSec=10
 
-# Run as the 'pi' user so it can access I2C without sudo
-# Change to your actual username if it is not 'pi'
-User=pi
-Group=pi
+# Run as the 'kamren' user so it can access I2C without sudo
+User=kamren
+Group=kamren
 
 # Give the I2C bus time to be ready after boot
 ExecStartPre=/bin/sleep 5

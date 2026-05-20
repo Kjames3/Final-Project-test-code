@@ -1,0 +1,22 @@
+serial:
+  device_linux: /dev/ttyACM0
+  device_win: COM1
+  device_mac: /dev/tty.usbserial
+  baudrate: 1000000
+
+hips:
+  left:
+    id: 1
+    default_pos: 3902
+    offset_rad: 0.0
+    direction: 1
+    min_rad: -1.5708
+    max_rad: 1.5708
+  right:
+    id: 2
+    default_pos: 151
+    offset_rad: 0.0
+    direction: -1
+    min_rad: -1.5708
+    max_rad: 1.5708
+
