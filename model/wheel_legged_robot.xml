@@ -1,0 +1,156 @@
+<mujoco model="wheel_legged_5bar">
+  <compiler angle="radian" meshdir="meshes" autolimits="true"/>
+
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"
+          solver="Newton" iterations="100" tolerance="1e-10"/>
+
+  <size njmax="500" nconmax="200"/>
+
+  <visual>
+    <headlight diffuse="0.7 0.7 0.7" ambient="0.4 0.4 0.4" specular="0.1 0.1 0.1"/>
+    <rgba haze="0.15 0.20 0.25 1"/>
+    <global azimuth="120" elevation="-20" offwidth="1200" offheight="900"/>
+  </visual>
+
+  <default>
+    <default class="link">
+      <geom type="mesh" rgba="0.6 0.6 0.65 1" contype="0" conaffinity="0" density="1200"/>
+      <joint type="hinge" axis="1 0 0" damping="0.05" armature="0.001"/>
+    </default>
+    <default class="wheel">
+      <geom type="mesh" rgba="0.2 0.2 0.22 1" contype="1" conaffinity="1"
+            density="950" friction="3.0 0.01 0.001" condim="6"/>
+      <joint type="hinge" axis="1 0 0" damping="0.02" armature="0.005"/>
+    </default>
+    <default class="hip_actuator">
+      <position kp="80" kv="4" ctrlrange="-2.0 2.0" forcerange="-30 30"/>
+    </default>
+    <default class="wheel_actuator">
+      <motor ctrlrange="-8 8" forcerange="-8 8"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.55 0.65 0.80" rgb2="0.10 0.15 0.25" width="256" height="256"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.25 0.27 0.30" rgb2="0.20 0.22 0.25" width="300" height="300"/>
+    <material name="grid" texture="grid" texrepeat="10 10" reflectance="0.05"/>
+    <mesh name="chassis"     file="chassis.stl"     scale="0.001 0.001 0.001"/>
+    <mesh name="upper_long"  file="upper_long.stl"  scale="0.001 0.001 0.001"/>
+    <mesh name="upper_short" file="upper_short.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="lower_a"     file="lower_a.stl"     scale="0.001 0.001 0.001"/>
+    <mesh name="lower_b"     file="lower_b.stl"     scale="0.001 0.001 0.001"/>
+    <mesh name="wheel"       file="wheel.stl"       scale="0.001 0.001 0.001"/>
+  </asset>
+
+  <worldbody>
+    <light name="top" pos="0 0 3" dir="0 0 -1" diffuse="0.7 0.7 0.7"/>
+    <geom name="floor" type="plane" size="5 5 0.1" material="grid" friction="3.0 0.005 0.0001" condim="3"/>
+
+    <body name="chassis" pos="0 0 0.389" childclass="link">
+      <freejoint name="root"/>
+      <inertial pos="0 0 0.105" mass="3.5" diaginertia="0.04 0.06 0.05"/>
+      <geom class="link" mesh="chassis" rgba="0.72 0.72 0.78 1" contype="1" conaffinity="1"/>
+      <site name="imu_site" pos="0 0 0.105" size="0.008" rgba="1 1 0 0.5"/>
+
+      <!-- ============== R SIDE 5-BAR ============== -->
+      <body name="UL_R" pos="0.11200 0.00000 0.10500" quat="0.903805 -0.427945 0.000000 0.000000">
+        <inertial pos="0 0.147 0" mass="0.30" diaginertia="0.003 0.0003 0.003"/>
+        <joint name="hip_UL_R" pos="0 0 0" range="-120 120" ref="0"/>
+        <geom class="link" mesh="upper_long" rgba="0.20 0.40 0.85 1"/>
+
+        <body name="LA_R" pos="0.02900 0.29400 0.00000" quat="0.777015 -0.629482 0.000000 0.000000">
+          <inertial pos="0 0.149 0" mass="0.25" diaginertia="0.003 0.0003 0.003"/>
+          <joint name="knee_KR_R" pos="0 0 0" range="-160 160" ref="0"/>
+          <geom class="link" mesh="lower_a" rgba="0.28 0.66 0.36 1"/>
+          <site name="foot_LA_R" pos="0 0.298 0" size="0.005" rgba="1 0 0 0.7"/>
+        </body>
+      </body>
+
+      <body name="US_R" pos="0.12800 0.00000 0.10500" quat="0.514655 -0.857397 0.000000 0.000000">
+        <inertial pos="0 0.100 0" mass="0.20" diaginertia="0.001 0.0002 0.001"/>
+        <joint name="hip_US_R" pos="0 0 0" range="-120 120" ref="0"/>
+        <geom class="link" mesh="upper_short" rgba="0.36 0.68 0.92 1"/>
+
+        <body name="LB_R" pos="0.02500 0.20100 0.00000" quat="0.918639 0.395099 0.000000 0.000000">
+          <inertial pos="0 0.149 0" mass="0.25" diaginertia="0.003 0.0003 0.003"/>
+          <joint name="knee_KF_R" pos="0 0 0" range="-160 160" ref="0"/>
+          <geom class="link" mesh="lower_b" rgba="0.22 0.54 0.28 1"/>
+
+          <body name="wheel_R" pos="-0.01200 0.29800 0.00000" quat="1 0 0 0">
+            <inertial pos="0 0 0" mass="0.20" diaginertia="0.00012 0.00018 0.00012"/>
+            <joint name="wheel_R_drive" type="hinge" axis="1 0 0"
+                   damping="0.02" armature="0.005"/>
+            <geom class="wheel" mesh="wheel" rgba="0.20 0.20 0.22 1"/>
+            <site name="hub_R" pos="0 0 0" size="0.006" rgba="0 1 0 0.7"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- ============== L SIDE 5-BAR ============== -->
+      <body name="UL_L" pos="-0.11200 0.00000 0.10500" quat="0.903805 -0.427945 0.000000 0.000000">
+        <inertial pos="0 0.147 0" mass="0.30" diaginertia="0.003 0.0003 0.003"/>
+        <joint name="hip_UL_L" pos="0 0 0" range="-120 120" ref="0"/>
+        <geom class="link" mesh="upper_long" rgba="0.20 0.40 0.85 1"/>
+
+        <body name="LA_L" pos="-0.02900 0.29400 0.00000" quat="0.777015 -0.629482 0.000000 0.000000">
+          <inertial pos="0 0.149 0" mass="0.25" diaginertia="0.003 0.0003 0.003"/>
+          <joint name="knee_KR_L" pos="0 0 0" range="-160 160" ref="0"/>
+          <geom class="link" mesh="lower_a" rgba="0.28 0.66 0.36 1"/>
+          <site name="foot_LA_L" pos="0 0.298 0" size="0.005" rgba="1 0 0 0.7"/>
+        </body>
+      </body>
+
+      <body name="US_L" pos="-0.12800 0.00000 0.10500" quat="0.514655 -0.857397 0.000000 0.000000">
+        <inertial pos="0 0.100 0" mass="0.20" diaginertia="0.001 0.0002 0.001"/>
+        <joint name="hip_US_L" pos="0 0 0" range="-120 120" ref="0"/>
+        <geom class="link" mesh="upper_short" rgba="0.36 0.68 0.92 1"/>
+
+        <body name="LB_L" pos="-0.02500 0.20100 0.00000" quat="0.918639 0.395099 0.000000 0.000000">
+          <inertial pos="0 0.149 0" mass="0.25" diaginertia="0.003 0.0003 0.003"/>
+          <joint name="knee_KF_L" pos="0 0 0" range="-160 160" ref="0"/>
+          <geom class="link" mesh="lower_b" rgba="0.22 0.54 0.28 1"/>
+
+          <body name="wheel_L" pos="0.01200 0.29800 0.00000" quat="0 0 0 1">
+            <inertial pos="0 0 0" mass="0.20" diaginertia="0.00012 0.00018 0.00012"/>
+            <joint name="wheel_L_drive" type="hinge" axis="1 0 0"
+                   damping="0.02" armature="0.005"/>
+            <geom class="wheel" mesh="wheel" rgba="0.20 0.20 0.22 1"/>
+            <site name="hub_L" pos="0 0 0" size="0.006" rgba="0 1 0 0.7"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <equality>
+    <!-- 5-bar closure: pin lower-a's tip to the wheel hub -->
+    <connect name="loop_R" site1="foot_LA_R" site2="hub_R" active="true" solref="0.005 1"/>
+    <connect name="loop_L" site1="foot_LA_L" site2="hub_L" active="true" solref="0.005 1"/>
+    <!-- Mechanical coupling: the short upper rod follows the long upper rod
+         (hip_US = -hip_UL). Makes each leg a single-DOF up/down mechanism. -->
+    <joint name="couple_R" joint1="hip_US_R" joint2="hip_UL_R" polycoef="0 -1 0 0 0" solref="0.005 1"/>
+    <joint name="couple_L" joint1="hip_US_L" joint2="hip_UL_L" polycoef="0 -1 0 0 0" solref="0.005 1"/>
+  </equality>
+
+  <actuator>
+    <!-- One hip motor per side (UL drives, US follows via joint equality) -->
+    <position class="hip_actuator" name="motor_hip_R" joint="hip_UL_R"/>
+    <position class="hip_actuator" name="motor_hip_L" joint="hip_UL_L"/>
+    <!-- One wheel motor per side: torque control for balance + drive -->
+    <motor class="wheel_actuator" name="motor_wheel_R" joint="wheel_R_drive"/>
+    <motor class="wheel_actuator" name="motor_wheel_L" joint="wheel_L_drive"/>
+  </actuator>
+
+  <sensor>
+    <jointpos name="qp_UL_R" joint="hip_UL_R"/>
+    <jointpos name="qp_US_R" joint="hip_US_R"/>
+    <jointpos name="qp_UL_L" joint="hip_UL_L"/>
+    <jointpos name="qp_US_L" joint="hip_US_L"/>
+    <jointvel name="qv_wheel_R" joint="wheel_R_drive"/>
+    <jointvel name="qv_wheel_L" joint="wheel_L_drive"/>
+    <framepos    name="chassis_pos"  objtype="body" objname="chassis"/>
+    <framequat   name="chassis_quat" objtype="body" objname="chassis"/>
+    <gyro        name="imu_gyro"     site="imu_site"/>
+    <accelerometer name="imu_acc"    site="imu_site"/>
+  </sensor>
+</mujoco>
