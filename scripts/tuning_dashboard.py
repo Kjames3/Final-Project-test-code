@@ -173,6 +173,20 @@ def get_telemetry():
     """Expose a clean real-time JSON telemetry endpoint for front-end charts."""
     return jsonify(bridge.get_telemetry())
 
+@app.route('/api/arm', methods=['POST'])
+def arm_robot():
+    """Send START command to arm the robot — exits the idle/READY holding state."""
+    success = bridge.send_arm()
+    return jsonify({"status": "success" if success else "error",
+                    "transmitted": success})
+
+@app.route('/api/estop', methods=['POST'])
+def emergency_stop():
+    """Send ESTOP command — stops motors immediately and disarms the robot."""
+    success = bridge.send_estop()
+    return jsonify({"status": "success" if success else "error",
+                    "transmitted": success})
+
 @app.route('/api/control', methods=['POST'])
 def send_control():
     """Allows manual control commands (speed, turn, jump) from the dashboard interface."""
