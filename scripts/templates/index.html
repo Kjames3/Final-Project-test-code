@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wheel-Legged Robot — LQR Tuner</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg: #0c0c0f;
+            --surface: #111116;
+            --surface2: #17171f;
+            --border: #1e1e28;
+            --text: #dde1ea;
+            --muted: #525770;
+            --accent: #22d3ee;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+
+        /* ── Header ─────────────────────────────────────────────── */
+        .header {
+            padding: 0.875rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header h1 {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .header p {
+            font-size: 0.72rem;
+            color: var(--muted);
+            margin-top: 1px;
+        }
+
+        .status-pill {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 0.3rem 0.7rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+
+        .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .status-pill.connected {
+            color: var(--success);
+            border-color: rgba(16, 185, 129, 0.2);
+        }
+
+        .status-pill.connected .dot {
+            background: var(--success);
+        }
+
+        .status-pill.disconnected {
+            color: var(--danger);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .status-pill.disconnected .dot {
+            background: var(--danger);
+        }
+
+        /* ── Two-column grid ─────────────────────────────────────── */
+        .grid {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 1px;
+            background: var(--border);
+            min-height: calc(100vh - 53px);
+        }
+
+        @media (max-width: 1024px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .col {
+            background: var(--bg);
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        /* ── Generic panel ───────────────────────────────────────── */
+        .panel {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface);
+            overflow: hidden;
+        }
+
+        .panel-head {
+            padding: 0.625rem 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-head h2 {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--muted);
+        }
+
+        .panel-body {
+            padding: 1rem;
+        }
+
+        /* ── Telemetry row ───────────────────────────────────────── */
+        .telem-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .telem-cell {
+            padding: 0.875rem 1rem;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+        }
+
+        .telem-cell:last-child {
+            border-right: none;
+        }
+
+        .telem-label {
+            font-size: 0.67rem;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--muted);
+            margin-bottom: 0.3rem;
+        }
+
+        .telem-val {
+            font-size: 1.45rem;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ── Charts ──────────────────────────────────────────────── */
+        .chart-wrap {
+            position: relative;
+            height: 200px;
+        }
+
+        .chart-wrap-sm {
+            position: relative;
+            height: 130px;
+        }
+
+        .imu-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .imu-col {
+            padding: 0.875rem;
+        }
+
+        .imu-col:first-child {
+            border-right: 1px solid var(--border);
+        }
+
+        .imu-label {
+            font-size: 0.67rem;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--muted);
+            margin-bottom: 0.5rem;
+        }
+
+        /* ── Control panel ───────────────────────────────────────── */
+        .ctrl-layout {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 1.5rem;
+            align-items: center;
+        }
+
+        .dpad {
+            display: grid;
+            grid-template-areas: ". up ." "left ctr right" ". dn .";
+            grid-template-columns: repeat(3, 50px);
+            grid-template-rows: repeat(3, 50px);
+            gap: 4px;
+        }
+
+        .dpad-btn {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 0.95rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.1s, border-color 0.1s;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .dpad-btn:hover {
+            background: rgba(34, 211, 238, 0.06);
+            border-color: rgba(34, 211, 238, 0.3);
+        }
+
+        .dpad-btn:active {
+            background: rgba(34, 211, 238, 0.12);
+        }
+
+        .btn-up {
+            grid-area: up;
+        }
+
+        .btn-left {
+            grid-area: left;
+        }
+
+        .btn-ctr {
+            grid-area: ctr;
+            font-size: 0.6rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            color: var(--danger);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+
+        .btn-right {
+            grid-area: right;
+        }
+
+        .btn-dn {
+            grid-area: dn;
+        }
+
+        /* ── Action buttons ──────────────────────────────────────── */
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.65rem 1rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            cursor: pointer;
+            border: 1px solid transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            transition: background 0.12s, border-color 0.12s;
+        }
+
+        .btn-arm {
+            background: rgba(16, 185, 129, 0.07);
+            border-color: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+        }
+
+        .btn-arm:hover {
+            background: rgba(16, 185, 129, 0.14);
+        }
+
+        .btn-jump {
+            background: rgba(34, 211, 238, 0.06);
+            border-color: rgba(34, 211, 238, 0.15);
+            color: var(--accent);
+        }
+
+        .btn-jump:hover {
+            background: rgba(34, 211, 238, 0.12);
+        }
+
+        .btn-estop {
+            background: var(--danger);
+            color: #fff;
+            border-color: var(--danger);
+        }
+
+        .btn-estop:hover {
+            background: #dc2626;
+        }
+
+        /* ── Gains column ────────────────────────────────────────── */
+        .gains-col {
+            background: var(--bg);
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.875rem;
+        }
+
+        .col-head {
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.07em;
+            color: var(--muted);
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .slider-item {
+            padding: 0.75rem 0.875rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+        }
+
+        .slider-top {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.4rem;
+        }
+
+        .slider-name {
+            flex: 1;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .sync-tag {
+            font-size: 0.62rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 0.1rem 0.38rem;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .tag-synced {
+            display: inline-block;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+        }
+
+        .tag-pending {
+            display: inline-block;
+            background: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+        }
+
+        .num-input {
+            width: 68px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 4px;
+            padding: 0.25rem 0.45rem;
+            text-align: right;
+            font-size: 0.82rem;
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+            outline: none;
+        }
+
+        .num-input:focus {
+            border-color: var(--accent);
+        }
+
+        .range-input {
+            width: 100%;
+            height: 3px;
+            border-radius: 4px;
+            background: var(--surface2);
+            accent-color: var(--accent);
+            cursor: pointer;
+            margin: 0.5rem 0 0.3rem;
+            display: block;
+        }
+
+        .param-hint {
+            font-size: 0.7rem;
+            color: var(--muted);
+            line-height: 1.4;
+        }
+
+        .btn-save {
+            background: var(--accent);
+            color: #0c0c0f;
+            border-color: var(--accent);
+            font-weight: 700;
+            padding: 0.75rem;
+            border-radius: 6px;
+            font-size: 0.78rem;
+            margin-top: auto;
+        }
+
+        .btn-save:hover {
+            background: #06b6d4;
+        }
+
+        .hint-box {
+            padding: 0.75rem 0.875rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--surface);
+            font-size: 0.72rem;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .hint-box strong {
+            color: var(--text);
+        }
+    </style>
+</head>
+
+<body>
+
+    <header class="header">
+        <div>
+            <h1>Wheel-Legged Robot</h1>
+            <p>UCR ME 225 Final Project — Real-Time LQR Balance Tuner</p>
+        </div>
+        <div id="statusPill" class="status-pill disconnected">
+            <span class="dot"></span>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </header>
+
+    <div class="grid">
+
+        <!-- ── Left column ─────────────────────────────────────────── -->
+        <div class="col">
+
+            <!-- Telemetry row -->
+            <div class="telem-row">
+                <div class="telem-cell">
+                    <div class="telem-label">Pitch</div>
+                    <div class="telem-val" id="valTilt" style="color:var(--accent)">0.0°</div>
+                </div>
+                <div class="telem-cell">
+                    <div class="telem-label">Speed</div>
+                    <div class="telem-val" id="valSpeed" style="color:var(--accent)">0 cm/s</div>
+                </div>
+                <div class="telem-cell">
+                    <div class="telem-label">Balance</div>
+                    <div class="telem-val" id="valState" style="color:var(--success)">OK</div>
+                </div>
+                <div class="telem-cell">
+                    <div class="telem-label">Jump</div>
+                    <div class="telem-val" id="valJump" style="color:var(--muted); font-size:1rem; padding-top:0.4rem">
+                        Ground</div>
+                </div>
+            </div>
+
+            <!-- Dynamics chart -->
+            <div class="panel">
+                <div class="panel-head">
+                    <h2>Dynamics</h2>
+                    <span style="font-size:0.68rem; color:var(--muted)">10 Hz</span>
+                </div>
+                <div class="panel-body">
+                    <div class="chart-wrap">
+                        <canvas id="dynamicsChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- IMU charts -->
+            <div class="panel">
+                <div class="panel-head">
+                    <h2>IMU — Raw Axes</h2>
+                </div>
+                <div class="imu-row">
+                    <div class="imu-col">
+                        <div class="imu-label">Accelerometer (g)</div>
+                        <div class="chart-wrap-sm">
+                            <canvas id="accelChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="imu-col">
+                        <div class="imu-label">Gyroscope (°/s)</div>
+                        <div class="chart-wrap-sm">
+                            <canvas id="gyroChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="panel">
+                <div class="panel-head">
+                    <h2>Control</h2>
+                </div>
+                <div class="panel-body">
+                    <div class="ctrl-layout">
+                        <div class="dpad">
+                            <button class="dpad-btn btn-up" onmousedown="drive(150,0)" onmouseup="drive(0,0)"
+                                ontouchstart="drive(150,0)" ontouchend="drive(0,0)">▲</button>
+                            <button class="dpad-btn btn-left" onmousedown="drive(0,-120)" onmouseup="drive(0,0)"
+                                ontouchstart="drive(0,-120)" ontouchend="drive(0,0)">◀</button>
+                            <button class="dpad-btn btn-ctr" onclick="drive(0,0)">STOP</button>
+                            <button class="dpad-btn btn-right" onmousedown="drive(0,120)" onmouseup="drive(0,0)"
+                                ontouchstart="drive(0,120)" ontouchend="drive(0,0)">▶</button>
+                            <button class="dpad-btn btn-dn" onmousedown="drive(-150,0)" onmouseup="drive(0,0)"
+                                ontouchstart="drive(-150,0)" ontouchend="drive(0,0)">▼</button>
+                        </div>
+                        <div class="actions">
+                            <button class="btn btn-arm" onclick="armRobot()">&#9654; Arm Robot</button>
+                            <button class="btn btn-jump" onclick="triggerJump()">&#9889; Trigger Jump</button>
+                            <button class="btn btn-estop" onclick="emergencyStop()">&#11035; Emergency Stop</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ── Right column: gains ──────────────────────────────────── -->
+        <div class="gains-col">
+            <div class="col-head">LQR Gains</div>
+
+            <div id="slidersRoot" style="display:flex; flex-direction:column; gap:0.625rem; flex:1;">
+                <div style="padding:2rem; text-align:center; color:var(--muted); font-size:0.8rem;">
+                    Loading schema&hellip;
+                </div>
+            </div>
+
+            <button class="btn btn-save" onclick="saveGains()" style="text-transform:uppercase; letter-spacing:0.06em;">
+                Save &amp; Upload to Arduino
+            </button>
+
+            <div class="hint-box">
+                <strong>Tuning reference:</strong> Kp &rarr; Pitch P-Gain &middot;
+                Kd &rarr; Pitch D-Gain &middot; Kv &rarr; Speed P-Gain &middot;
+                Ki &rarr; Speed I-Gain. Adjust <strong>Balance Offset</strong>
+                so the robot stands still at zero setpoint speed.
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // ── State ─────────────────────────────────────────────────────
+        let parameterSchema = [];
+        let currentGains = {};
+        let acknowledgedGains = {};
+        const N = 80;
+
+        // ── Chart factory ─────────────────────────────────────────────
+        function makeChart(id, datasets) {
+            const ctx = document.getElementById(id).getContext('2d');
+            const labels = Array(N).fill('');
+            datasets.forEach(d => { d.data = Array(N).fill(null); });
+            return new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: {
+                        legend: {
+                            labels: {
+                                color: '#525770',
+                                font: { size: 10 },
+                                boxWidth: 10,
+                                padding: 10
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { display: false },
+                        y: {
+                            grid: { color: 'rgba(255,255,255,0.04)' },
+                            ticks: { color: '#525770', font: { size: 10 }, maxTicksLimit: 5 },
+                            border: { color: '#1e1e28' }
+                        }
+                    }
+                }
+            });
+        }
+
+        const dynamicsChart = makeChart('dynamicsChart', [
+            {
+                label: 'Tilt (deg)', borderColor: '#22d3ee', backgroundColor: 'rgba(34,211,238,0.05)',
+                borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true
+            },
+            {
+                label: 'Speed (cm/s)', borderColor: '#a78bfa', backgroundColor: 'rgba(167,139,250,0.05)',
+                borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true
+            }
+        ]);
+
+        const accelChart = makeChart('accelChart', [
+            { label: 'X', borderColor: '#f87171', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+            { label: 'Y', borderColor: '#4ade80', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+            { label: 'Z', borderColor: '#60a5fa', borderWidth: 1.5, pointRadius: 0, tension: 0.2 }
+        ]);
+
+        const gyroChart = makeChart('gyroChart', [
+            { label: 'X', borderColor: '#fb923c', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+            { label: 'Y', borderColor: '#34d399', borderWidth: 1.5, pointRadius: 0, tension: 0.2 },
+            { label: 'Z', borderColor: '#818cf8', borderWidth: 1.5, pointRadius: 0, tension: 0.2 }
+        ]);
+
+        function pushChart(chart, ...vals) {
+            chart.data.datasets.forEach((ds, i) => {
+                ds.data.push(vals[i] ?? null);
+                ds.data.shift();
+            });
+            chart.update('none');
+        }
+
+        // ── Schema & Sliders ──────────────────────────────────────────
+        async function fetchSchema() {
+            try {
+                const res = await fetch('/api/schema');
+                parameterSchema = await res.json();
+                renderSliders();
+                await fetchGains();
+            } catch (err) { console.error('Schema load failed:', err); }
+        }
+
+        function renderSliders() {
+            const root = document.getElementById('slidersRoot');
+            root.innerHTML = '';
+            parameterSchema.forEach(p => {
+                const el = document.createElement('div');
+                el.className = 'slider-item';
+                el.id = `group-${p.id}`;
+                el.innerHTML = `
+                <div class="slider-top">
+                    <span class="slider-name">${p.name}</span>
+                    <span id="badge-${p.id}" class="sync-tag"></span>
+                    <input type="number" id="num-${p.id}" class="num-input"
+                           min="${p.min}" max="${p.max}" step="${p.step}"
+                           oninput="onNumInput('${p.id}', this.value)">
+                </div>
+                <input type="range" id="slide-${p.id}" class="range-input"
+                       min="${p.min}" max="${p.max}" step="${p.step}"
+                       oninput="onSlideInput('${p.id}', this.value)">
+                <div class="param-hint">${p.desc}</div>
+            `;
+                root.appendChild(el);
+            });
+        }
+
+        async function fetchGains() {
+            try {
+                const res = await fetch('/api/gains');
+                const data = await res.json();
+                currentGains = data.active;
+                acknowledgedGains = data.acknowledged;
+                Object.keys(currentGains).forEach(k => {
+                    const s = document.getElementById(`slide-${k}`);
+                    const n = document.getElementById(`num-${k}`);
+                    if (s) s.value = currentGains[k];
+                    if (n) n.value = currentGains[k];
+                    updateBadge(k);
+                });
+            } catch (err) { console.error('Gains load failed:', err); }
+        }
+
+        function updateBadge(key) {
+            const badge = document.getElementById(`badge-${key}`);
+            if (!badge) return;
+            const val = parseFloat(currentGains[key]);
+            const ack = parseFloat(acknowledgedGains[key]);
+            if (!isNaN(ack) && Math.abs(val - ack) < 0.01) {
+                badge.className = 'sync-tag tag-synced';
+                badge.textContent = 'Synced';
+            } else {
+                badge.className = 'sync-tag tag-pending';
+                badge.textContent = 'Pending';
+            }
+        }
+
+        function onSlideInput(key, val) {
+            currentGains[key] = parseFloat(val);
+            document.getElementById(`num-${key}`).value = val;
+            updateBadge(key);
+        }
+
+        function onNumInput(key, val) {
+            const v = parseFloat(val);
+            if (!isNaN(v)) {
+                currentGains[key] = v;
+                document.getElementById(`slide-${key}`).value = v;
+                updateBadge(key);
+            }
+        }
+
+        async function saveGains() {
+            try {
+                const res = await fetch('/api/gains', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentGains)
+                });
+                const r = await res.json();
+                if (r.status === 'success') await fetchGains();
+                else alert('Save failed: ' + r.message);
+            } catch (err) { alert('Save failed: ' + err); }
+        }
+
+        // ── Robot commands ────────────────────────────────────────────
+        async function post(path, body) {
+            try {
+                await fetch(path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: body ? JSON.stringify(body) : undefined
+                });
+            } catch (err) { console.error(path, err); }
+        }
+
+        function drive(speed, turn) { post('/api/control', { speed, turn, jump: 0 }); }
+        function triggerJump() { post('/api/control', { speed: 0, turn: 0, jump: 1 }); }
+        function armRobot() { post('/api/arm'); }
+        function emergencyStop() { post('/api/estop'); }
+
+        // ── Telemetry polling ─────────────────────────────────────────
+        async function pollTelemetry() {
+            try {
+                const res = await fetch('/api/telemetry');
+                const d = await res.json();
+
+                const pill = document.getElementById('statusPill');
+                const txt = document.getElementById('statusText');
+                if (d.connected) {
+                    pill.className = 'status-pill connected';
+                    txt.textContent = d.port ? d.port.toUpperCase() : 'Connected';
+                } else {
+                    pill.className = 'status-pill disconnected';
+                    txt.textContent = 'Disconnected';
+                }
+
+                document.getElementById('valTilt').textContent = d.tilt_angle.toFixed(1) + '°';
+                document.getElementById('valSpeed').textContent = d.wheel_speed_cms.toFixed(0) + ' cm/s';
+
+                const stateEl = document.getElementById('valState');
+                stateEl.textContent = d.fallen ? 'FALLEN' : 'OK';
+                stateEl.style.color = d.fallen ? 'var(--danger)' : 'var(--success)';
+
+                const jumpEl = document.getElementById('valJump');
+                jumpEl.textContent = d.jumping ? 'Jumping' : 'Ground';
+                jumpEl.style.color = d.jumping ? 'var(--accent)' : 'var(--muted)';
+
+                acknowledgedGains = {
+                    kp_angle: d.ack_kp_angle,
+                    kd_angle: d.ack_kd_angle,
+                    kp_speed: d.ack_kp_speed,
+                    ki_speed: d.ack_ki_speed,
+                    balance_offset: d.ack_balance_offset
+                };
+                Object.keys(currentGains).forEach(updateBadge);
+
+                pushChart(dynamicsChart, d.tilt_angle, d.wheel_speed_cms);
+
+                // accel in g (raw / 16384), gyro in deg/s (raw / 131)
+                // fields are optional until the backend is updated to send them
+                pushChart(accelChart, d.accel_x ?? 0, d.accel_y ?? 0, d.accel_z ?? 0);
+                pushChart(gyroChart, d.gyro_x ?? 0, d.gyro_y ?? 0, d.gyro_z ?? 0);
+
+            } catch (err) { console.error('Telemetry poll failed:', err); }
+        }
+
+        // ── Init ──────────────────────────────────────────────────────
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchSchema();
+            setInterval(pollTelemetry, 100);
+            setInterval(fetchGains, 1500);
+        });
+    </script>
+
+</body>
+
+</html>
