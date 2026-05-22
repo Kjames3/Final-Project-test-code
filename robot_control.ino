@@ -422,15 +422,29 @@ void parseSerial() {
 }
 
 // ── SEND TELEMETRY TO RPi ─────────────────────────────────────
+// Format: TEL:<tilt>:<speed_cms>:<fallen>:<jumping>:<ax_g>:<ay_g>:<az_g>:<gx_dps>:<gy_dps>:<gz_dps>
 void sendTelemetry() {
   Serial.print("TEL:");
   Serial.print(tiltAngle, 1);
   Serial.print(":");
-  Serial.print(speedAvg * 100, 0);  // cm/s
+  Serial.print(speedAvg * 100, 0);          // cm/s
   Serial.print(":");
-  Serial.print(fallen ? "1" : "0");
+  Serial.print(fallen  ? "1" : "0");
   Serial.print(":");
-  Serial.println(jumping ? "1" : "0");
+  Serial.print(jumping ? "1" : "0");
+  // IMU axes in physical units (±2g accel, ±250°/s gyro)
+  Serial.print(":");
+  Serial.print((float)ax / 16384.0, 3);    // accel X (g)
+  Serial.print(":");
+  Serial.print((float)ay / 16384.0, 3);    // accel Y (g)
+  Serial.print(":");
+  Serial.print((float)az / 16384.0, 3);    // accel Z (g)
+  Serial.print(":");
+  Serial.print((float)gx / 131.0, 2);      // gyro X (°/s)
+  Serial.print(":");
+  Serial.print((float)gy / 131.0, 2);      // gyro Y (°/s)
+  Serial.print(":");
+  Serial.println((float)gz / 131.0, 2);    // gyro Z (°/s)
 }
 
 // ── SETUP ─────────────────────────────────────────────────────

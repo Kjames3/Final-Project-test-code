@@ -45,6 +45,14 @@ class ArduinoBridge:
         self._ack_ki_speed = 0.0
         self._ack_balance_offset = 0.0
 
+        # IMU raw axes (in physical units: g and °/s)
+        self._accel_x = 0.0
+        self._accel_y = 0.0
+        self._accel_z = 0.0
+        self._gyro_x  = 0.0
+        self._gyro_y  = 0.0
+        self._gyro_z  = 0.0
+
         # Commanded values (saved to allow background loop to resend/keep alive if needed)
         self.cmd_speed = 0
         self.cmd_turn = 0
@@ -136,6 +144,36 @@ class ArduinoBridge:
                     self._is_connected = False
                 return False
 
+    def send_arm(self) -> bool:
+        """Send START command to arm the robot (exits idle/READY state)."""
+        if not self.is_connected():
+            return False
+        with self._write_lock:
+            if self.ser is None or not self.ser.is_open:
+                return False
+            try:
+                self.ser.write(b"START\n")
+                self.ser.flush()
+                return True
+            except Exception:
+                with self._state_lock:
+                    self._is_connected = False
+                return False
+
+    def send_estop(self) -> bool:
+        """Send ESTOP command — stops motors immediately and disarms the robot."""
+        with self._write_lock:
+            if self.ser is None or not self.ser.is_open:
+                return False
+            try:
+                self.ser.write(b"ESTOP\n")
+                self.ser.flush()
+                return True
+            except Exception:
+                with self._state_lock:
+                    self._is_connected = False
+                return False
+
     def send_command(self, speed: int, turn: int, jump: int = 0) -> bool:
         """
         Send a movement or jump command package to the Arduino.
@@ -181,18 +219,25 @@ class ArduinoBridge:
         """Return a snapshot of the current telemetry values."""
         with self._state_lock:
             return {
-                "tilt_angle": self._tilt_angle,
-                "wheel_speed_cms": self._wheel_speed,
-                "fallen": self._fallen,
-                "jumping": self._jumping,
-                "age_sec": time.time() - self._last_received if self._last_received > 0 else float("inf"),
-                "connected": self._is_connected,
-                "port": self.port,
-                "ack_kp_angle": self._ack_kp_angle,
-                "ack_kd_angle": self._ack_kd_angle,
-                "ack_kp_speed": self._ack_kp_speed,
-                "ack_ki_speed": self._ack_ki_speed,
-                "ack_balance_offset": self._ack_balance_offset
+                "tilt_angle":       self._tilt_angle,
+                "wheel_speed_cms":  self._wheel_speed,
+                "fallen":           self._fallen,
+                "jumping":          self._jumping,
+                "age_sec":          time.time() - self._last_received if self._last_received > 0 else float("inf"),
+                "connected":        self._is_connected,
+                "port":             self.port,
+                "ack_kp_angle":     self._ack_kp_angle,
+                "ack_kd_angle":     self._ack_kd_angle,
+                "ack_kp_speed":     self._ack_kp_speed,
+                "ack_ki_speed":     self._ack_ki_speed,
+                "ack_balance_offset": self._ack_balance_offset,
+                # IMU axes — g and °/s
+                "accel_x": self._accel_x,
+                "accel_y": self._accel_y,
+                "accel_z": self._accel_z,
+                "gyro_x":  self._gyro_x,
+                "gyro_y":  self._gyro_y,
+                "gyro_z":  self._gyro_z,
             }
 
     def _comm_loop(self) -> None:
@@ -224,10 +269,10 @@ class ArduinoBridge:
                         self._parse_telemetry(line)
                     elif line.startswith("TUN_ACK:"):
                         self._parse_tuning_ack(line)
-                    elif line == "READY":
-                        # Arduino is fully booted and ready
+                    elif line in ("READY", "RUNNING", "STOPPED"):
                         with self._state_lock:
                             self._is_connected = True
+                        print(f"[Arduino] {line}")
             except Exception:
                 # Serial read error - connection dropped
                 with self._state_lock:
@@ -242,25 +287,34 @@ class ArduinoBridge:
             time.sleep(0.005)  # Yield CPU
 
     def _parse_telemetry(self, line: str) -> None:
-        """Parse packet in the format: 'TEL:<tiltAngle>:<speedAvg>:<fallen>:<jumping>'."""
+        """Parse packet: 'TEL:<tilt>:<speed_cms>:<fallen>:<jumping>[:<ax>:<ay>:<az>:<gx>:<gy>:<gz>]'."""
         parts = line[4:].split(":")
-        if len(parts) >= 4:
-            try:
-                tilt = float(parts[0])
-                speed = float(parts[1])
-                fallen = parts[2] == "1"
-                jumping = parts[3] == "1"
+        if len(parts) < 4:
+            return
+        try:
+            tilt    = float(parts[0])
+            speed   = float(parts[1])
+            fallen  = parts[2] == "1"
+            jumping = parts[3] == "1"
 
-                with self._state_lock:
-                    self._tilt_angle = tilt
-                    self._wheel_speed = speed
-                    self._fallen = fallen
-                    self._jumping = jumping
-                    self._last_received = time.time()
-                    self._is_connected = True
-            except ValueError:
-                # Malformed numbers, ignore line
-                pass
+            ax = float(parts[4]) if len(parts) > 4 else 0.0
+            ay = float(parts[5]) if len(parts) > 5 else 0.0
+            az = float(parts[6]) if len(parts) > 6 else 0.0
+            gx = float(parts[7]) if len(parts) > 7 else 0.0
+            gy = float(parts[8]) if len(parts) > 8 else 0.0
+            gz = float(parts[9]) if len(parts) > 9 else 0.0
+
+            with self._state_lock:
+                self._tilt_angle    = tilt
+                self._wheel_speed   = speed
+                self._fallen        = fallen
+                self._jumping       = jumping
+                self._accel_x, self._accel_y, self._accel_z = ax, ay, az
+                self._gyro_x,  self._gyro_y,  self._gyro_z  = gx, gy, gz
+                self._last_received = time.time()
+                self._is_connected  = True
+        except ValueError:
+            pass
 
     def _parse_tuning_ack(self, line: str) -> None:
         """Parse packet in format: 'TUN_ACK:<kpAngle>:<kdAngle>:<kpSpeed>:<kiSpeed>:<balanceOffset>'."""
