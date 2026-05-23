@@ -24,7 +24,7 @@ ADDR_MOVING        = 66
 
 def is_moving(bus, servo_id: int) -> bool:
     """Return True if the servo reports it is still in motion."""
-    moving, comm_result, _ = bus.packet.read1ByteTxRx(bus.port, servo_id, ADDR_MOVING)
+    moving, comm_result, _ = bus.packet.read1ByteTxRx(servo_id, ADDR_MOVING)
     if comm_result == 0:  # COMM_SUCCESS
         return bool(moving)
     return False
@@ -118,10 +118,10 @@ def set_default_positions():
 
     # Enable torque and set limits
     try:
-        bus.packet.write2ByteTxRx(bus.port, m1_id, ADDR_TORQUE_LIMIT, MAX_TORQUE)
-        bus.packet.write2ByteTxRx(bus.port, m2_id, ADDR_TORQUE_LIMIT, MAX_TORQUE)
-        bus.packet.write1ByteTxRx(bus.port, m1_id, ADDR_TORQUE_ENABLE, 1)
-        bus.packet.write1ByteTxRx(bus.port, m2_id, ADDR_TORQUE_ENABLE, 1)
+        bus.packet.write2ByteTxRx(m1_id, ADDR_TORQUE_LIMIT, MAX_TORQUE)
+        bus.packet.write2ByteTxRx(m2_id, ADDR_TORQUE_LIMIT, MAX_TORQUE)
+        bus.packet.write1ByteTxRx(m1_id, ADDR_TORQUE_ENABLE, 1)
+        bus.packet.write1ByteTxRx(m2_id, ADDR_TORQUE_ENABLE, 1)
     except Exception as e:
         print(f"✗ Failed to configure torque settings: {e}")
         bus.close()

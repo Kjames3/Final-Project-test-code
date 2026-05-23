@@ -47,7 +47,7 @@ def read_status():
 
     # Disable torque so the motor can be moved freely by hand
     try:
-        bus.packet.write1ByteTxRx(bus.port, motor_id, ADDR_TORQUE_ENABLE, 0)
+        bus.packet.write1ByteTxRx(motor_id, ADDR_TORQUE_ENABLE, 0)
         print("\n✓ Torque disabled. You can now move the motor horn by hand.")
     except Exception as e:
         print(f"✗ Failed to disable torque: {e}")
@@ -69,7 +69,7 @@ def read_status():
             position = servo.read_raw_position()
             
             # Read speed (2 bytes)
-            speed, comm_result, _ = bus.packet.read2ByteTxRx(bus.port, motor_id, ADDR_PRESENT_SPEED)
+            speed, comm_result, _ = bus.packet.read2ByteTxRx(motor_id, ADDR_PRESENT_SPEED)
 
             if comm_result == 0:  # COMM_SUCCESS
                 degrees = position * 360.0 / 4096.0

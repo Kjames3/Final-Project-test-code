@@ -1,6 +1,7 @@
 """Cycle a Feetech hip servo: center -> +90 -> center -> -90 -> repeat."""
 
 import math
+import sys
 import threading
 import time
 

@@ -87,20 +87,20 @@ class FeetechServo:
     def set_angle(self, angle_rad: float) -> None:
         ticks = self._angle_to_ticks(angle_rad)
         result, error = self.bus.packet.write2ByteTxRx(
-            self.bus.port, self.servo_id, ADDR_GOAL_POSITION, ticks
+            self.servo_id, ADDR_GOAL_POSITION, ticks
         )
         _check(self.bus.packet, result, error, f"set_angle servo {self.servo_id}")
 
     def read_angle(self) -> Optional[float]:
         ticks, result, error = self.bus.packet.read2ByteTxRx(
-            self.bus.port, self.servo_id, ADDR_PRESENT_POSITION
+            self.servo_id, ADDR_PRESENT_POSITION
         )
         _check(self.bus.packet, result, error, f"read_angle servo {self.servo_id}")
         return self._ticks_to_angle(ticks)
 
     def read_raw_position(self) -> int:
         ticks, result, error = self.bus.packet.read2ByteTxRx(
-            self.bus.port, self.servo_id, ADDR_PRESENT_POSITION
+            self.servo_id, ADDR_PRESENT_POSITION
         )
         _check(self.bus.packet, result, error, f"read_raw_position servo {self.servo_id}")
         return ticks
@@ -116,17 +116,17 @@ class FeetechServo:
         """Reassign this servo's ID. Power-cycle to apply."""
         _check(
             self.bus.packet,
-            *self.bus.packet.write1ByteTxRx(self.bus.port, self.servo_id, ADDR_LOCK, 0),
+            *self.bus.packet.write1ByteTxRx(self.servo_id, ADDR_LOCK, 0),
             "unlock EEPROM",
         )
         _check(
             self.bus.packet,
-            *self.bus.packet.write1ByteTxRx(self.bus.port, self.servo_id, ADDR_ID, new_id),
+            *self.bus.packet.write1ByteTxRx(self.servo_id, ADDR_ID, new_id),
             "write new ID",
         )
         _check(
             self.bus.packet,
-            *self.bus.packet.write1ByteTxRx(self.bus.port, new_id, ADDR_LOCK, 1),
+            *self.bus.packet.write1ByteTxRx(new_id, ADDR_LOCK, 1),
             "lock EEPROM",
         )
         self.servo_id = new_id
