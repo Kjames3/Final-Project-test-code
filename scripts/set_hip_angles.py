@@ -6,7 +6,7 @@ import math
 import _bootstrap  # noqa: F401
 
 from src.drivers.feetech_servo import FeetechBus, FeetechServo
-from src.utils.config import default_serial_device, load_config
+from src.utils.config import default_feetech_device, load_config
 
 
 def main():
@@ -18,7 +18,7 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config()
-    port = args.port or default_serial_device(cfg)
+    port = args.port or default_feetech_device(cfg)
 
     left_rad = math.radians(args.left) if args.deg else args.left
     right_rad = math.radians(args.right) if args.deg else args.right

@@ -5,6 +5,9 @@ serial:
   baudrate: 1000000
 
 hips:
+  device_linux: /dev/ttyACM1
+  device_win: COM2
+  device_mac: /dev/tty.usbserial2
   left:
     id: 1
     default_pos: 3902

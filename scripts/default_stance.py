@@ -9,7 +9,7 @@ import time
 import _bootstrap  # noqa: F401
 
 from src.drivers.feetech_servo import FeetechBus, FeetechServo
-from src.utils.config import default_serial_device, load_config
+from src.utils.config import default_feetech_device, load_config
 
 # Movement parameters — conservative speed to avoid slamming parallel linkage
 MOVE_SPEED = 500    # steps/sec  (max ~4000, keep low for safety)
@@ -44,7 +44,7 @@ def raw_to_deg(raw: int) -> float:
 
 def set_default_positions():
     cfg = load_config()
-    default_port = default_serial_device(cfg)
+    default_port = default_feetech_device(cfg)
 
     print("\n  ===================================================")
     print("    JUMPING WHEEL-LEGGED ROBOT — Safe Default Stance ")

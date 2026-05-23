@@ -10,7 +10,7 @@ import threading
 import _bootstrap  # noqa: F401
 
 from src.drivers.feetech_servo import FeetechBus, FeetechServo
-from src.utils.config import default_serial_device, load_config
+from src.utils.config import default_feetech_device, load_config
 
 # RAM Addresses
 ADDR_TORQUE_ENABLE = 40
@@ -24,7 +24,7 @@ def wait_for_enter():
 
 def read_status():
     cfg = load_config()
-    default_port = default_serial_device(cfg)
+    default_port = default_feetech_device(cfg)
     default_id = cfg["hips"]["left"]["id"]
 
     print("\n  ===================================================")

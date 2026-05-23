@@ -19,3 +19,13 @@ def default_serial_device(cfg: dict) -> str:
     if sys.platform == "darwin":
         return serial["device_mac"]
     return serial["device_linux"]
+
+
+def default_feetech_device(cfg: dict) -> str:
+    hips = cfg.get("hips", {})
+    if sys.platform == "win32":
+        return hips.get("device_win", "COM2")
+    if sys.platform == "darwin":
+        return hips.get("device_mac", "/dev/tty.usbserial2")
+    return hips.get("device_linux", "/dev/ttyACM1")
+

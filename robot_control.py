@@ -17,7 +17,7 @@ from typing import List, Tuple, Optional
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from src.drivers.arduino_bridge import ArduinoBridge
-from src.utils.config import load_config, default_serial_device
+from src.utils.config import load_config, default_serial_device, default_feetech_device
 
 # ── ANSI COLORS & STYLES ───────────────────────────────────────────
 CLR_ESC = "\033["
@@ -307,9 +307,9 @@ def main():
     # Load configuration values to discover Feetech defaults
     try:
         cfg = load_config()
-        cfg_feetech_port = default_serial_device(cfg)
+        cfg_feetech_port = default_feetech_device(cfg)
     except Exception:
-        cfg_feetech_port = "/dev/ttyACM0"
+        cfg_feetech_port = "/dev/ttyACM1"
 
     # Scan and detect ports
     scanned_ports = scan_serial_ports()

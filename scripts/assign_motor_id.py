@@ -3,12 +3,12 @@
 import _bootstrap  # noqa: F401
 
 from src.drivers.feetech_servo import FeetechBus, FeetechServo
-from src.utils.config import default_serial_device, load_config
+from src.utils.config import default_feetech_device, load_config
 
 
 def main():
     cfg = load_config()
-    default_port = default_serial_device(cfg)
+    default_port = default_feetech_device(cfg)
 
     port = input(f"Enter COM port (default {default_port}): ") or default_port
     try:

@@ -2,7 +2,11 @@ import sys
 import time
 from scservo_sdk import *
 
-port_name = '/dev/ttyACM1'
+import _bootstrap  # noqa: F401
+from src.utils.config import default_feetech_device, load_config
+
+cfg = load_config()
+port_name = default_feetech_device(cfg)
 baudrates = [1000000, 500000, 115200, 57600, 38400]
 
 portHandler = PortHandler(port_name)

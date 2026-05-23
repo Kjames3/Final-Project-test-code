@@ -10,11 +10,11 @@ import _bootstrap  # noqa: F401
 
 from src.drivers.wheel_motors import WheelMotorsDriver
 from src.drivers.imu import IMUTelemetry
-from src.utils.config import load_config
+from src.utils.config import load_config, default_serial_device
 
 def main():
     cfg = load_config()
-    default_port = "/dev/ttyACM0"  # Default Arduino USB connection
+    default_port = default_serial_device(cfg)  # Default Arduino USB connection
 
     print("\n  ===================================================")
     print("    JUMPING WHEEL-LEGGED ROBOT — JGB-520 Motors Test ")
