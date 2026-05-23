@@ -2,7 +2,7 @@ import sys
 import time
 from scservo_sdk import *
 
-port_name = '/dev/ttyACM0'
+port_name = '/dev/ttyACM1'
 baudrates = [1000000, 500000, 115200, 57600, 38400]
 
 portHandler = PortHandler(port_name)
