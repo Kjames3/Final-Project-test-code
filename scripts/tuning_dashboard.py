@@ -50,7 +50,8 @@ app = Flask(__name__,
             static_folder=os.path.join(ROOT_DIR, "scripts", "static"))
 
 # Initialize Serial Bridge
-bridge = ArduinoBridge()
+port_override = sys.argv[1] if len(sys.argv) > 1 else None
+bridge = ArduinoBridge(port=port_override)
 
 # Active gains cache
 active_gains = DEFAULT_GAINS.copy()

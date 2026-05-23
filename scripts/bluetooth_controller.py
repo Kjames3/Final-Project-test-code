@@ -182,7 +182,11 @@ def main():
     print(f"{'='*55}{RST}\n")
 
     # Find Arduino
-    port = find_arduino_port()
+    if len(sys.argv) > 1:
+        port = sys.argv[1]
+    else:
+        port = find_arduino_port()
+        
     if port is None:
         print(f"{RED}ERROR: Arduino not found.")
         print(f"  Check USB cable and ensure Arduino is powered.{RST}")

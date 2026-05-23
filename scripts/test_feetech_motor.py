@@ -23,7 +23,10 @@ def main():
     default_port = default_serial_device(cfg)
     default_id = cfg["hips"]["left"]["id"]
 
-    port = input(f"Enter COM port (default {default_port}): ") or default_port
+    if len(sys.argv) > 1:
+        port = sys.argv[1]
+    else:
+        port = input(f"Enter COM port (default {default_port}): ") or default_port
     try:
         servo_id = int(input(f"Enter servo ID (default {default_id}): ") or default_id)
     except ValueError:

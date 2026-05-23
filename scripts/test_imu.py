@@ -19,7 +19,13 @@ def main():
     print("    JUMPING WHEEL-LEGGED ROBOT — IMU Telemetry Monitor")
     print("  ===================================================\n")
 
-    port_name = input(f"Enter Arduino COM port (default {default_port}): ") or default_port
+    if len(sys.argv) > 1:
+        port_name = sys.argv[1]
+    else:
+        from src.drivers.arduino_bridge import ArduinoBridge
+        detected = ArduinoBridge.find_port()
+        default_port = detected or default_port
+        port_name = input(f"Enter Arduino COM port (default {default_port}): ") or default_port
 
     try:
         telem = IMUTelemetry(port=port_name)

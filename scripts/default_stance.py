@@ -50,7 +50,10 @@ def set_default_positions():
     print("    JUMPING WHEEL-LEGGED ROBOT — Safe Default Stance ")
     print("  ===================================================\n")
 
-    port_name = input(f"Enter COM port (default {default_port}): ").strip() or default_port
+    if len(sys.argv) > 1:
+        port_name = sys.argv[1]
+    else:
+        port_name = input(f"Enter COM port (default {default_port}): ").strip() or default_port
 
     # Extract configuration
     m1_id = cfg["hips"]["left"]["id"]
