@@ -33,6 +33,11 @@ class IMUTelemetry:
         else:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
             time.sleep(2.0)  # Wait for Arduino bootloader
+            try:
+                self.ser.write(b"START\n")
+                self.ser.flush()
+            except Exception:
+                pass
 
         self.running = True
         self.thread = threading.Thread(target=self._reader_loop, daemon=True)

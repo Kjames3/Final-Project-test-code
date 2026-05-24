@@ -20,6 +20,11 @@ class WheelMotorsDriver:
         if self.ser is None:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
             time.sleep(2.0)  # Wait for Arduino bootloader to complete
+            try:
+                self.ser.write(b"START\n")
+                self.ser.flush()
+            except Exception:
+                pass
 
     def close(self) -> None:
         """Close serial connection."""
