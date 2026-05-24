@@ -332,10 +332,11 @@ def main():
         print(f"  [{CYAN}5{RESET}] 📊  {BOLD}LQR/PID Web-Based Tuning Server{RESET} (hosts glassmorphic dashboard)")
         print(f"  [{CYAN}6{RESET}] 🔄  {BOLD}Feetech Servo Cyclic Stress Test{RESET} (cycles hip servos ±90 deg)")
         print(f"  [{CYAN}7{RESET}] 📈  {BOLD}Real-Time Terminal Telemetry Feed{RESET}(live sensor table in terminal)")
-        print(f"  [{CYAN}8{RESET}] ⚙️   {BOLD}Configure USB Serial Ports{RESET}       (manually assign ports)")
-        print(f"  [{CYAN}9{RESET}] ❌  {BOLD}Exit Central Controller{RESET}\n")
+        print(f"  [{CYAN}8{RESET}] ⚖️   {BOLD}Calibrate Upright Pitch Offset{RESET}  (finds zero-torque balance point)")
+        print(f"  [{CYAN}9{RESET}] ⚙️   {BOLD}Configure USB Serial Ports{RESET}       (manually assign ports)")
+        print(f"  [{CYAN}10{RESET}] ❌  {BOLD}Exit Central Controller{RESET}\n")
 
-        choice = input(f"{BOLD}Enter choice [1-9]: {RESET}").strip()
+        choice = input(f"{BOLD}Enter choice [1-10]: {RESET}").strip()
 
         if choice == '1':
             launch_script("scripts/test_wheels.py", arduino_port, "Wheel Motors Calibration Test")
@@ -352,8 +353,10 @@ def main():
         elif choice == '7':
             run_diagnostic_telemetry(arduino_port)
         elif choice == '8':
-            arduino_port, feetech_port = configure_ports(arduino_port, feetech_port, scanned_ports)
+            launch_script("scripts/calibrate_balance_offset.py", arduino_port, "Calibrate Upright Pitch Offset")
         elif choice == '9':
+            arduino_port, feetech_port = configure_ports(arduino_port, feetech_port, scanned_ports)
+        elif choice == '10':
             clear_screen()
             print(f"\n{GREEN}{BOLD}Goodbye! Keep on jumping!{RESET}\n")
             sys.exit(0)
