@@ -1,13 +1,25 @@
-serial:
+# =========================================================================
+#             JUMPING WHEEL-LEGGED ROBOT — CONFIGURATION SCHEMA
+#                         Developed for UCR MEDDL Lab
+# =========================================================================
+
+# ── ARDUINO UNO R3 TELEMETRY LINK ────────────────────────────────────────
+# Coordinates wheel control LQR loops, encoder interrupts, and MPU6050 feed.
+arduino:
   device_linux: /dev/ttyACM0
   device_win: COM1
   device_mac: /dev/tty.usbserial
-  baudrate: 1000000
+  baudrate: 115200
 
-hips:
+# ── FEETECH HIGH-TORQUE HIP JOINTS BUS ──────────────────────────────────
+# Manages multi-turn STS series daisy-chained hip joint bus servos.
+feetech:
   device_linux: /dev/ttyACM1
   device_win: COM2
   device_mac: /dev/tty.usbserial2
+  baudrate: 1000000
+
+  # Individual joint parameters
   left:
     id: 1
     default_pos: 3902
@@ -23,10 +35,10 @@ hips:
     min_rad: -1.5708
     max_rad: 1.5708
 
+# ── DC DRIVE WHEELS (JGB-520 MOTORS) ────────────────────────────────────
+# Governs wheel geometry and encoder configurations for speed averaging.
 wheels:
   encoder_ppr: 660
   wheel_circumference_m: 0.065
   max_speed_pwm: 180
   max_turn_pwm: 80
-
-
