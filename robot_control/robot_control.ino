@@ -70,17 +70,16 @@ float balanceOffset = 2.5;
 #define LOOP_HZ         200    // balance loop frequency
 #define LOOP_US         (1000000 / LOOP_HZ)
 
-// ── PIN DEFINITIONS ───────────────────────────────────────────
-#define PIN_ENC_L_A     2      // INT0
-#define PIN_ENC_L_B     8
-#define PIN_ENC_R_A     12
-#define PIN_ENC_R_B     13
-#define PIN_AIN2        3
-#define PIN_AIN1        4
-#define PIN_PWMA        5
-#define PIN_PWMB        6
-#define PIN_BIN1        7
-#define PIN_BIN2        9
+// ── PIN DEFINITIONS (aligned with Assembly.md physical wiring) ────
+#define PIN_ENC_L_A     8      // PCINT0 (Port B)
+#define PIN_ENC_L_B     4
+#define PIN_ENC_R_A     7      // PCINT2 (Port D)
+#define PIN_ENC_R_B     2
+
+#define PIN_AIN1        9      // Left Motor PWM Direction 1 (OC1A)
+#define PIN_AIN2        10     // Left Motor PWM Direction 2 (OC1B)
+#define PIN_BIN1        5      // Right Motor PWM Direction 1 (OC0B)
+#define PIN_BIN2        6      // Right Motor PWM Direction 2 (OC0A)
 
 // Encoder counts (volatile — modified in ISR)
 volatile long encL = 0;
@@ -118,22 +117,27 @@ unsigned long prevSpeedMs  = 0;
 unsigned long prevSerialMs = 0;
 unsigned long prevReadyMs  = 0;
 
-// ── ENCODER ISR ───────────────────────────────────────────────
-void encL_ISR() {
-  // Count left encoder pulses (using A channel interrupt)
-  if (digitalRead(PIN_ENC_L_A) == digitalRead(PIN_ENC_L_B)) {
-    encL++;
-  } else {
-    encL--;
+// ── ENCODER ISRs (Hardware Pin Change Interrupts) ─────────────
+// Left Encoder ISR triggers on Pin 8 change (Port B, PCINT0)
+ISR(PCINT0_vect) {
+  static uint8_t lastStateL = LOW;
+  uint8_t stateA = digitalRead(PIN_ENC_L_A);
+  if (stateA != lastStateL) {
+    lastStateL = stateA;
+    if (stateA == digitalRead(PIN_ENC_L_B)) {
+      encL++;
+    } else {
+      encL--;
+    }
   }
 }
 
-// Right encoder Pin Change Interrupt vector (Port B: Pins 8 to 13)
-ISR(PCINT0_vect) {
-  static uint8_t lastState = LOW;
+// Right Encoder ISR triggers on Pin 7 change (Port D, PCINT2)
+ISR(PCINT2_vect) {
+  static uint8_t lastStateR = LOW;
   uint8_t stateA = digitalRead(PIN_ENC_R_A);
-  if (stateA != lastState) {
-    lastState = stateA;
+  if (stateA != lastStateR) {
+    lastStateR = stateA;
     if (stateA == digitalRead(PIN_ENC_R_B)) {
       encR--; // Mirrored right wheel rotation direction
     } else {
@@ -199,44 +203,38 @@ void updateAngle(float dt) {
               (1.0 - CF_ALPHA) * accelAngle;
 }
 
-// ── MOTOR CONTROL ─────────────────────────────────────────────
+// ── MOTOR CONTROL (Yahboom YB-MNT03-v1.0 TB6612 Dual PWM Mode) ──
 void setMotors(int leftPWM, int rightPWM) {
-  // Left motor (Channel A)
+  // Left motor (Channel A) — Pin 9 (AIN1) and Pin 10 (AIN2)
   if (leftPWM > 0) {
-    digitalWrite(PIN_AIN1, HIGH);
-    digitalWrite(PIN_AIN2, LOW);
-    analogWrite(PIN_PWMA, constrain(leftPWM, 0, 255));
-  } else if (leftPWM < 0) {
     digitalWrite(PIN_AIN1, LOW);
-    digitalWrite(PIN_AIN2, HIGH);
-    analogWrite(PIN_PWMA, constrain(-leftPWM, 0, 255));
+    analogWrite(PIN_AIN2, constrain(leftPWM, 0, 255));
+  } else if (leftPWM < 0) {
+    analogWrite(PIN_AIN1, constrain(-leftPWM, 0, 255));
+    digitalWrite(PIN_AIN2, LOW);
   } else {
     digitalWrite(PIN_AIN1, LOW);
     digitalWrite(PIN_AIN2, LOW);
-    analogWrite(PIN_PWMA, 0);
   }
 
-  // Right motor (Channel B)
+  // Right motor (Channel B) — Pin 5 (BIN1) and Pin 6 (BIN2)
   if (rightPWM > 0) {
-    digitalWrite(PIN_BIN1, HIGH);
+    analogWrite(PIN_BIN1, constrain(rightPWM, 0, 255));
     digitalWrite(PIN_BIN2, LOW);
-    analogWrite(PIN_PWMB, constrain(rightPWM, 0, 255));
   } else if (rightPWM < 0) {
     digitalWrite(PIN_BIN1, LOW);
-    digitalWrite(PIN_BIN2, HIGH);
-    analogWrite(PIN_PWMB, constrain(-rightPWM, 0, 255));
+    analogWrite(PIN_BIN2, constrain(-rightPWM, 0, 255));
   } else {
     digitalWrite(PIN_BIN1, LOW);
     digitalWrite(PIN_BIN2, LOW);
-    analogWrite(PIN_PWMB, 0);
   }
 }
 
 void stopMotors() {
-  digitalWrite(PIN_AIN1, LOW); digitalWrite(PIN_AIN2, LOW);
-  digitalWrite(PIN_BIN1, LOW); digitalWrite(PIN_BIN2, LOW);
-  analogWrite(PIN_PWMA, 0);
-  analogWrite(PIN_PWMB, 0);
+  digitalWrite(PIN_AIN1, LOW);
+  digitalWrite(PIN_AIN2, LOW);
+  digitalWrite(PIN_BIN1, LOW);
+  digitalWrite(PIN_BIN2, LOW);
 }
 
 // ── SPEED MEASUREMENT ─────────────────────────────────────────
@@ -413,8 +411,6 @@ void setup() {
   pinMode(PIN_AIN2, OUTPUT);
   pinMode(PIN_BIN1, OUTPUT);
   pinMode(PIN_BIN2, OUTPUT);
-  pinMode(PIN_PWMA, OUTPUT);
-  pinMode(PIN_PWMB, OUTPUT);
   stopMotors();
 
   // Encoder pins
@@ -423,15 +419,20 @@ void setup() {
   pinMode(PIN_ENC_R_A, INPUT_PULLUP);
   pinMode(PIN_ENC_R_B, INPUT_PULLUP);
 
-  // Left encoder interrupt
-  attachInterrupt(digitalPinToInterrupt(PIN_ENC_L_A),
-                  encL_ISR, CHANGE);
-
-  // Right encoder PCINT configuration (Pin 12 / PB4 / PCINT4)
-  cli();                  // Disable global interrupts while configuring
-  PCICR |= (1 << PCIE0);    // Enable Port B Pin Change Interrupt (PCIE0)
-  PCMSK0 |= (1 << PCINT4);  // Enable mask specifically for Pin 12 (PCINT4)
-  sei();                  // Re-enable interrupts
+  // Configure Pin Change Interrupts (PCINT) for encoders
+  cli();                      // Disable global interrupts while configuring
+  
+  // Enable PCINT for Port B (PCIE0) and Port D (PCIE2)
+  PCICR |= (1 << PCIE0);      // Port B (Pins 8-13)
+  PCICR |= (1 << PCIE2);      // Port D (Pins 0-7)
+  
+  // Mask PCINT0 specifically for Left Encoder Ch A (Pin 8 / PCINT0)
+  PCMSK0 |= (1 << PCINT0);
+  
+  // Mask PCINT2 specifically for Right Encoder Ch A (Pin 7 / PCINT23)
+  PCMSK2 |= (1 << PCINT23);
+  
+  sei();                      // Re-enable interrupts
 
 
   // MPU6050

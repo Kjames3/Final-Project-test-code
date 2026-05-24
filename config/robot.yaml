@@ -42,3 +42,11 @@ wheels:
   wheel_circumference_m: 0.065
   max_speed_pwm: 180
   max_turn_pwm: 80
+
+  # Individual wheel configurations (aligned with physical drivers)
+  left:
+    id: 1                  # Motor 1 / Channel A
+    direction: 1           # Direction multiplier (1 = normal)
+  right:
+    id: 2                  # Motor 2 / Channel B
+    direction: -1          # Direction multiplier (-1 = mirrored mounting)
