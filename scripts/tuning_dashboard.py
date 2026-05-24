@@ -106,6 +106,270 @@ active_gains = load_gains_from_disk()
 sync_thread = threading.Thread(target=sync_gains_to_arduino, daemon=True)
 sync_thread.start()
 
+
+# --- LQR AUTO-TUNING & BAYESIAN OPTIMIZATION CORE ---
+
+# Search bounds for active gains optimization
+AUTOTUNE_BOUNDS = {
+    "kp_angle": (30.0, 65.0),
+    "kd_angle": (1.0, 4.0)
+}
+
+autotune_lock = threading.Lock()
+autotune_cancel_event = threading.Event()
+autotune_resume_event = threading.Event()
+
+# Active auto-tuning state tracking
+autotune_state = {
+    "status": "idle",       # "idle", "running", "paused_fallen", "completed", "cancelled"
+    "iteration": 0,
+    "total_iterations": 10,
+    "current_gains": {"kp_angle": 0.0, "kd_angle": 0.0},
+    "cost": 0.0,
+    "logs": [],             # terminal logs sent to the browser
+    "trials": []            # list of tested iterations
+}
+
+def log_msg(msg: str, level: str = "info"):
+    timestamp = time.strftime("%H:%M:%S")
+    prefix = ""
+    if level == "error":
+        prefix = "✗ "
+    elif level == "warning":
+        prefix = "⚠ "
+    elif level == "info" and any(k in msg for k in ["COMPLETE", "optimal", "Stand"]):
+        prefix = "✓ "
+        
+    formatted = f"[{timestamp}] {prefix}{msg}"
+    print(formatted)
+    
+    with autotune_lock:
+        autotune_state["logs"].append(formatted)
+        if len(autotune_state["logs"]) > 80:
+            autotune_state["logs"].pop(0)
+
+def set_autotune_status(status: str):
+    with autotune_lock:
+        autotune_state["status"] = status
+
+def set_autotune_iteration(iteration: int):
+    with autotune_lock:
+        autotune_state["iteration"] = iteration
+
+def set_autotune_current_gains(kp: float, kd: float):
+    with autotune_lock:
+        autotune_state["current_gains"] = {"kp_angle": kp, "kd_angle": kd}
+
+def set_autotune_cost(cost: float):
+    with autotune_lock:
+        autotune_state["cost"] = cost
+
+def register_trial_result(iteration: int, kp: float, kd: float, cost: float, status: str):
+    with autotune_lock:
+        autotune_state["trials"].append({
+            "iteration": iteration,
+            "kp_angle": kp,
+            "kd_angle": kd,
+            "cost": cost,
+            "status": status
+        })
+
+def save_trial_log_to_disk(iteration: int, kp: float, kd: float, cost: float, samples: list, status: str):
+    logs_dir = os.path.join(CONFIG_DIR, "autotune_logs")
+    os.makedirs(logs_dir, exist_ok=True)
+    filepath = os.path.join(logs_dir, f"trial_{iteration}.json")
+    try:
+        trial_data = {
+            "iteration": iteration,
+            "kp_angle": kp,
+            "kd_angle": kd,
+            "cost": cost,
+            "status": status,
+            "samples": samples
+        }
+        with open(filepath, 'w') as f:
+            json.dump(trial_data, f, indent=4)
+    except Exception as e:
+        print(f"Failed to save trial log to disk: {e}")
+
+def run_autotune_loop():
+    global autotune_state, active_gains
+    
+    from src.utils.bayes_opt import BayesianOptimizer
+    
+    optimizer = BayesianOptimizer(AUTOTUNE_BOUNDS, length_scale=0.3, noise=1e-4, kappa=1.96)
+    
+    log_msg("Initiating Bayesian Auto-Tuning sequence...")
+    if not bridge.is_connected():
+        log_msg("✗ Error: Arduino is disconnected. Aborting auto-tune.", level="error")
+        set_autotune_status("idle")
+        return
+        
+    log_msg("Arming robot and entering balancing mode...")
+    bridge.send_arm()
+    time.sleep(1.5)  # Wait for startup transients to settle
+    
+    total_trials = 10
+    for iteration in range(1, total_trials + 1):
+        if autotune_cancel_event.is_set():
+            break
+            
+        set_autotune_iteration(iteration)
+        log_msg(f"--- Iteration {iteration} / {total_trials} ---")
+        
+        # Check safety fall before starting the iteration
+        telem = bridge.get_telemetry()
+        if telem.get("fallen", False):
+            log_msg("⚠ Safety Alert: Robot is fallen. Pausing and waiting for upright position...", level="warning")
+            set_autotune_status("paused_fallen")
+            autotune_resume_event.clear()
+            bridge.send_estop()  # Stop motors for safety
+            
+            # Wait for user to place it upright and click resume
+            while not autotune_resume_event.is_set():
+                if autotune_cancel_event.is_set():
+                    break
+                time.sleep(0.1)
+                
+            if autotune_cancel_event.is_set():
+                break
+                
+            log_msg("Resuming auto-tune! Re-arming robot...")
+            set_autotune_status("running")
+            bridge.send_arm()
+            time.sleep(1.5)
+            
+        # Get parameter suggestion
+        suggestion = optimizer.suggest()
+        kp = round(suggestion["kp_angle"], 2)
+        kd = round(suggestion["kd_angle"], 2)
+        
+        # Prepare full gain set (keeping speed and offsets persistent)
+        test_gains = active_gains.copy()
+        test_gains["kp_angle"] = kp
+        test_gains["kd_angle"] = kd
+        
+        log_msg(f"Testing gains: Kp = {kp}, Kd = {kd}")
+        set_autotune_current_gains(kp, kd)
+        
+        # Push gains to Arduino over Serial
+        success = bridge.send_tuning_gains(
+            kp_a=test_gains["kp_angle"],
+            kd_a=test_gains["kd_angle"],
+            kp_s=test_gains["kp_speed"],
+            ki_s=test_gains["ki_speed"],
+            b_o=test_gains["balance_offset"]
+        )
+        if not success:
+            log_msg("Failed to sync gains to Arduino. Retrying...", level="warning")
+            time.sleep(0.5)
+            bridge.send_tuning_gains(
+                kp_a=test_gains["kp_angle"],
+                kd_a=test_gains["kd_angle"],
+                kp_s=test_gains["kp_speed"],
+                ki_s=test_gains["ki_speed"],
+                b_o=test_gains["balance_offset"]
+            )
+            
+        time.sleep(0.8)  # Wait for transient adjustment
+        
+        # Inject drive disturbance tap
+        log_msg("Injecting disturbance tap (wheel speed impulse)...")
+        bridge.send_command(speed=80, turn=0, jump=0)
+        time.sleep(0.12)
+        bridge.send_command(speed=0, turn=0, jump=0)
+        
+        # Sensor Logging Loop at 20 Hz (duration = 1.8 seconds)
+        log_msg("Logging sensor telemetry streams...")
+        samples = []
+        duration = 1.8
+        interval = 0.05  # 50ms
+        num_samples = int(duration / interval)
+        
+        fallen_during_trial = False
+        
+        for s in range(num_samples):
+            if autotune_cancel_event.is_set():
+                break
+                
+            t_data = bridge.get_telemetry()
+            
+            # Check for safety fall during trial
+            if t_data.get("fallen", False) or abs(t_data.get("tilt_angle", 0.0)) > 30.0:
+                fallen_during_trial = True
+                log_msg("🛑 CRITICAL FALL DETECTED! Terminating trial.", level="error")
+                break
+                
+            samples.append({
+                "timestamp": time.time(),
+                "tilt_angle": t_data.get("tilt_angle", 0.0),
+                "wheel_speed_cms": t_data.get("wheel_speed_cms", 0.0)
+            })
+            time.sleep(interval)
+            
+        if autotune_cancel_event.is_set():
+            break
+            
+        # Evaluate Cost Metric
+        if fallen_during_trial:
+            cost = 9999.0
+            status_lbl = "FALLEN"
+            bridge.send_estop()  # Stop motors immediately
+        else:
+            # Quadratic cost index over the logged samples
+            cost_tilt = sum(sample["tilt_angle"]**2 for sample in samples)
+            cost_speed = sum(sample["wheel_speed_cms"]**2 for sample in samples)
+            cost = round((cost_tilt + 0.08 * cost_speed) / max(1, len(samples)), 2)
+            status_lbl = "SUCCESS"
+            
+        log_msg(f"Iteration {iteration} complete. Resulting Cost: {cost}")
+        
+        # Save raw logged samples to disk
+        save_trial_log_to_disk(iteration, kp, kd, cost, samples, status_lbl)
+        
+        # Register in Optimizer
+        optimizer.register({"kp_angle": kp, "kd_angle": kd}, cost)
+        
+        # Register trial in state
+        register_trial_result(iteration, kp, kd, cost, status_lbl)
+        
+    # Post-Optimization: lock in the best gains
+    if autotune_cancel_event.is_set():
+        log_msg("Auto-Tuning sequence cancelled by user.")
+        set_autotune_status("cancelled")
+        bridge.send_estop()
+    else:
+        best_idx = optimizer.y.index(min(optimizer.y))
+        best_params = optimizer.X_raw[best_idx]
+        best_cost = optimizer.y[best_idx]
+        
+        opt_kp = round(best_params["kp_angle"], 2)
+        opt_kd = round(best_params["kd_angle"], 2)
+        
+        log_msg("🎉 AUTO-TUNING COMPLETE!")
+        log_msg(f"Optimal gains found: Kp = {opt_kp}, Kd = {opt_kd} (Cost: {best_cost})")
+        
+        # Update active gains and save to disk
+        active_gains["kp_angle"] = opt_kp
+        active_gains["kd_angle"] = opt_kd
+        save_gains_to_disk(active_gains)
+        
+        # Push optimal gains to Arduino
+        bridge.send_tuning_gains(
+            kp_a=active_gains["kp_angle"],
+            kd_a=active_gains["kd_angle"],
+            kp_s=active_gains["kp_speed"],
+            ki_s=active_gains["ki_speed"],
+            b_o=active_gains["balance_offset"]
+        )
+        
+        set_autotune_status("completed")
+        set_autotune_cost(best_cost)
+        
+        log_msg("Standing upright with optimal gains locked in.")
+        bridge.send_arm()
+
+
 # --- WEB ENDPOINTS ---
 
 @app.route('/')
@@ -201,6 +465,57 @@ def send_control():
         return jsonify({"status": "success", "transmitted": success})
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 400
+
+
+@app.route('/api/autotune/start', methods=['POST'])
+def start_autotune():
+    global autotune_state
+    with autotune_lock:
+        if autotune_state["status"] == "running":
+            return jsonify({"status": "error", "message": "Auto-tuning is already running."}), 400
+            
+        # Reset state
+        autotune_state = {
+            "status": "running",
+            "iteration": 0,
+            "total_iterations": 10,
+            "current_gains": {"kp_angle": 0.0, "kd_angle": 0.0},
+            "cost": 0.0,
+            "logs": [],
+            "trials": []
+        }
+        autotune_cancel_event.clear()
+        autotune_resume_event.clear()
+        
+    t = threading.Thread(target=run_autotune_loop, daemon=True)
+    t.start()
+    return jsonify({"status": "success", "message": "Auto-tuning started."})
+
+
+@app.route('/api/autotune/resume', methods=['POST'])
+def resume_autotune():
+    with autotune_lock:
+        if autotune_state["status"] != "paused_fallen":
+            return jsonify({"status": "error", "message": "Auto-tuning is not in a paused state."}), 400
+        autotune_state["status"] = "running"
+    log_msg("User clicked Resume. Activating resume handshake...")
+    autotune_resume_event.set()
+    return jsonify({"status": "success", "message": "Auto-tuning resumed."})
+
+
+@app.route('/api/autotune/cancel', methods=['POST'])
+def cancel_autotune():
+    log_msg("Cancelling Auto-Tuning sequence...")
+    autotune_cancel_event.set()
+    autotune_resume_event.set()  # break wait if paused
+    return jsonify({"status": "success", "message": "Auto-tuning cancelled."})
+
+
+@app.route('/api/autotune/status', methods=['GET'])
+def get_autotune_status():
+    with autotune_lock:
+        return jsonify(autotune_state)
+
 
 if __name__ == '__main__':
     print("=======================================================")

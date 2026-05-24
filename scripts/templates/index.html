@@ -450,6 +450,16 @@
         .hint-box strong {
             color: var(--text);
         }
+
+        .pulse-warning {
+            animation: pulse-warn 1.4s infinite;
+        }
+
+        @keyframes pulse-warn {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; color: var(--warning) !important; border-color: rgba(245, 158, 11, 0.6) !important; }
+            100% { opacity: 0.6; }
+        }
     </style>
 </head>
 
@@ -521,6 +531,56 @@
                         <div class="imu-label">Gyroscope (°/s)</div>
                         <div class="chart-wrap-sm">
                             <canvas id="gyroChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Auto-Tuning Panel -->
+            <div class="panel">
+                <div class="panel-head">
+                    <h2>Auto-Tuning — Bayesian LQR Optimization</h2>
+                    <span id="tuneStatus" style="font-size:0.68rem; font-weight:700; color:var(--muted)">IDLE</span>
+                </div>
+                <div class="panel-body">
+                    <div class="tune-layout">
+                        <div class="tune-ctrls">
+                            <button id="btnStartTune" class="btn btn-arm" style="width:100%;" onclick="startAutoTune()">&#9881; Start Auto-Tune</button>
+                            <div class="tune-sub-ctrls" style="display:none; gap:0.5rem; margin-top:0.5rem; width:100%;">
+                                <button id="btnResumeTune" class="btn btn-arm" style="flex:1;" onclick="resumeAutoTune()">&#9654; Resume</button>
+                                <button id="btnCancelTune" class="btn btn-estop" style="flex:1;" onclick="cancelAutoTune()">&#11035; Cancel</button>
+                            </div>
+                        </div>
+                        <div class="tune-monitor" style="display:none; margin-top:1rem;">
+                            <!-- Progress Bar -->
+                            <div class="progress-wrap" style="background:var(--surface2); height:6px; border-radius:3px; overflow:hidden; margin-bottom:0.5rem; border: 1px solid var(--border);">
+                                <div id="tuneProgress" style="background:var(--accent); width:0%; height:100%; transition:width 0.3s;"></div>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-bottom:0.875rem;">
+                                <span id="tuneIterText">Trial 0 / 10</span>
+                                <span id="tuneGainsText" style="color:var(--accent); font-weight: 600;">Kp: --, Kd: --</span>
+                            </div>
+                            
+                            <!-- Logs Screen -->
+                            <div class="tune-console" id="tuneConsole" style="background:#08080a; border:1px solid var(--border); border-radius:6px; height:110px; overflow-y:auto; padding:0.625rem; font-family:'Courier New', monospace; font-size:0.75rem; color:#a78bfa; margin-bottom:1rem; white-space:pre-wrap; line-height:1.4; text-align:left;"></div>
+                            
+                            <!-- Table of Trials -->
+                            <div class="tune-table-wrap" style="max-height:130px; overflow-y:auto; border:1px solid var(--border); border-radius:6px;">
+                                <table style="width:100%; border-collapse:collapse; font-size:0.75rem; text-align:left;">
+                                    <thead>
+                                        <tr style="background:var(--surface2); border-bottom:1px solid var(--border); color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">
+                                            <th style="padding:0.45rem 0.625rem;">Iter</th>
+                                            <th style="padding:0.45rem 0.625rem;">Kp</th>
+                                            <th style="padding:0.45rem 0.625rem;">Kd</th>
+                                            <th style="padding:0.45rem 0.625rem;">Cost</th>
+                                            <th style="padding:0.45rem 0.625rem; text-align:right;">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tuneTableBody">
+                                        <!-- Trial rows will be inserted here dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -805,11 +865,112 @@
             } catch (err) { console.error('Telemetry poll failed:', err); }
         }
 
+        // ── Auto-Tuning Loop & AJAX Helpers ───────────────────────────
+        let isTuningActive = false;
+
+        async function pollAutoTune() {
+            try {
+                const res = await fetch('/api/autotune/status');
+                const state = await res.json();
+                
+                const tuneStatus = document.getElementById('tuneStatus');
+                const btnStart = document.getElementById('btnStartTune');
+                const subCtrls = document.querySelector('.tune-sub-ctrls');
+                const tuneMon = document.querySelector('.tune-monitor');
+                const progress = document.getElementById('tuneProgress');
+                const iterText = document.getElementById('tuneIterText');
+                const gainsText = document.getElementById('tuneGainsText');
+                const consoleEl = document.getElementById('tuneConsole');
+                const tableBody = document.getElementById('tuneTableBody');
+                
+                tuneStatus.textContent = state.status.toUpperCase();
+                
+                if (state.status === 'idle' || state.status === 'completed' || state.status === 'cancelled') {
+                    btnStart.style.display = 'flex';
+                    subCtrls.style.display = 'none';
+                    if (state.status === 'idle') {
+                        tuneMon.style.display = 'none';
+                        tuneStatus.style.color = 'var(--muted)';
+                    } else {
+                        tuneMon.style.display = 'block';
+                        tuneStatus.style.color = state.status === 'completed' ? 'var(--success)' : 'var(--danger)';
+                    }
+                    isTuningActive = false;
+                } else {
+                    // Running or Paused
+                    btnStart.style.display = 'none';
+                    subCtrls.style.display = 'flex';
+                    tuneMon.style.display = 'block';
+                    isTuningActive = true;
+                    
+                    const btnResume = document.getElementById('btnResumeTune');
+                    if (state.status === 'paused_fallen') {
+                        tuneStatus.style.color = 'var(--warning)';
+                        tuneStatus.className = 'status-pill pulse-warning';
+                        btnResume.style.display = 'flex';
+                    } else {
+                        tuneStatus.style.color = 'var(--accent)';
+                        tuneStatus.className = '';
+                        btnResume.style.display = 'none';
+                    }
+                }
+                
+                if (tuneMon.style.display === 'block') {
+                    const pct = (state.iteration / state.total_iterations) * 100;
+                    progress.style.width = `${pct}%`;
+                    iterText.textContent = `Trial ${state.iteration} / ${state.total_iterations}`;
+                    
+                    if (state.current_gains.kp_angle > 0) {
+                        gainsText.textContent = `Kp: ${state.current_gains.kp_angle.toFixed(2)}, Kd: ${state.current_gains.kd_angle.toFixed(2)}`;
+                    } else {
+                        gainsText.textContent = `Kp: --, Kd: --`;
+                    }
+                    
+                    // Render Logs with autoscroll
+                    const atBottom = (consoleEl.scrollHeight - consoleEl.clientHeight - consoleEl.scrollTop) < 20;
+                    consoleEl.textContent = state.logs.join('\n');
+                    if (atBottom || consoleEl.scrollTop === 0) {
+                        consoleEl.scrollTop = consoleEl.scrollHeight;
+                    }
+                    
+                    // Render Trials Table
+                    tableBody.innerHTML = '';
+                    state.trials.forEach(t => {
+                        const tr = document.createElement('tr');
+                        tr.style.borderBottom = '1px solid var(--border)';
+                        
+                        let color = 'var(--text)';
+                        if (t.status === 'FALLEN') color = 'var(--danger)';
+                        else if (t.status === 'SUCCESS') color = 'var(--success)';
+                        
+                        tr.innerHTML = `
+                            <td style="padding:0.45rem 0.625rem; font-weight:700;">${t.iteration}</td>
+                            <td style="padding:0.45rem 0.625rem; font-variant-numeric:tabular-nums;">${t.kp_angle.toFixed(2)}</td>
+                            <td style="padding:0.45rem 0.625rem; font-variant-numeric:tabular-nums;">${t.kd_angle.toFixed(2)}</td>
+                            <td style="padding:0.45rem 0.625rem; font-variant-numeric:tabular-nums; font-weight:600;">${t.cost === 9999 ? '9999 (Fall)' : t.cost.toFixed(1)}</td>
+                            <td style="padding:0.45rem 0.625rem; text-align:right; font-weight:700; color:${color};">${t.status}</td>
+                        `;
+                        tableBody.appendChild(tr);
+                    });
+                }
+                
+            } catch (err) { console.error('Tuner status poll failed:', err); }
+        }
+
+        async function startAutoTune() {
+            if (confirm('Start LQR Auto-Tuning? \nWarning: The robot will arm and perform 10 physical impulse test trials. Ensure the workspace is clear!')) {
+                await post('/api/autotune/start');
+            }
+        }
+        async function resumeAutoTune() { await post('/api/autotune/resume'); }
+        async function cancelAutoTune() { await post('/api/autotune/cancel'); }
+
         // ── Init ──────────────────────────────────────────────────────
         window.addEventListener('DOMContentLoaded', () => {
             fetchSchema();
             setInterval(pollTelemetry, 100);
             setInterval(fetchGains, 1500);
+            setInterval(pollAutoTune, 500); // Poll status at 2 Hz
         });
     </script>
 
