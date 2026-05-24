@@ -274,8 +274,11 @@ def run_autotune_loop():
         time.sleep(0.8)  # Wait for transient adjustment
         
         # Inject drive disturbance tap
+        # NOTE: speed=20 (~0.12 m/s) is intentionally gentle — large values cause
+        # the robot to travel too far in the 120 ms window and saturate the PWM,
+        # making cost measurements meaningless.
         log_msg("Injecting disturbance tap (wheel speed impulse)...")
-        bridge.send_command(speed=80, turn=0, jump=0)
+        bridge.send_command(speed=20, turn=0, jump=0)
         time.sleep(0.12)
         bridge.send_command(speed=0, turn=0, jump=0)
         
