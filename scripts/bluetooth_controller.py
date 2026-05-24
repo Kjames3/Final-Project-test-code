@@ -25,10 +25,11 @@ SERVER_PORT     = 9898         # TCP port that robot_server.py listens on
 LOOP_HZ         = 50          # how often we send commands
 DEADZONE        = 0.08        # stick dead zone (0.0 - 1.0)
 MAX_SPEED       = 255         # max motor PWM (reduce to limit speed)
-MAX_TURN        = 180         # max turn PWM
+MAX_TURN        = 255         # max turn PWM — full range so Arduino sees up to MAX_TURN ticks
 TURBO_FACTOR    = 1.5         # speed multiplier when RB/R1 held
 JUMP_COOLDOWN   = 2.0         # seconds between jumps
 CONTROLLER_WAIT = 30          # seconds to wait for a controller to appear
+HIP_SEND_HZ     = 10          # how often to send hip commands while button held
 
 # ── AXIS INDICES (same layout for Xbox and PS4 on Linux) ──────
 AXIS_LX         = 0   # Left stick X  (-1=left,  +1=right)
@@ -145,32 +146,36 @@ def detect_controller_mapping(joystick) -> dict:
         # 8=Share/Create  9=Options  10=L3  11=R3  12=PS  13=Touchpad
         return {
             'profile': 'PS4/PS5',
-            'BTN_A':     0,   # Cross   → Jump
-            'BTN_B':     1,   # Circle  → E-Stop
-            'BTN_X':     2,   # Square
-            'BTN_Y':     3,   # Triangle
-            'BTN_LB':    4,   # L1
-            'BTN_RB':    5,   # R1      → Turbo
-            'BTN_BACK':  8,   # Share / Create
-            'BTN_START': 9,   # Options → Resume
-            'BTN_LS':   10,   # L3
-            'BTN_RS':   11,   # R3
+            'BTN_A':         0,   # Cross       → Jump
+            'BTN_B':         1,   # Circle      → E-Stop
+            'BTN_X':         2,   # Square
+            'BTN_Y':         3,   # Triangle
+            'BTN_LB':        4,   # L1
+            'BTN_RB':        5,   # R1          → Turbo
+            'BTN_HIP_LOWER': 4,   # L1 (hold)   → Lower hips
+            'BTN_HIP_RAISE': 7,   # R2 (hold)   → Raise hips
+            'BTN_BACK':      8,   # Share/Create
+            'BTN_START':     9,   # Options     → Resume
+            'BTN_LS':       10,   # L3
+            'BTN_RS':       11,   # R3
         }
     else:
         # Xbox One / Xbox 360 layout
         # 0=A  1=B  2=X  3=Y  4=LB  5=RB  6=Back  7=Start  8=LS  9=RS
         return {
             'profile': 'Xbox',
-            'BTN_A':     0,   # A       → Jump
-            'BTN_B':     1,   # B       → E-Stop
-            'BTN_X':     2,
-            'BTN_Y':     3,
-            'BTN_LB':    4,
-            'BTN_RB':    5,   # RB      → Turbo
-            'BTN_BACK':  6,
-            'BTN_START': 7,   # Start   → Resume
-            'BTN_LS':    8,
-            'BTN_RS':    9,
+            'BTN_A':         0,   # A           → Jump
+            'BTN_B':         1,   # B           → E-Stop
+            'BTN_X':         2,
+            'BTN_Y':         3,
+            'BTN_LB':        4,
+            'BTN_RB':        5,   # RB          → Turbo
+            'BTN_HIP_LOWER': 4,   # LB (hold)   → Lower hips
+            'BTN_HIP_RAISE': 3,   # Y  (hold)   → Raise hips
+            'BTN_BACK':      6,
+            'BTN_START':     7,   # Start       → Resume
+            'BTN_LS':        8,
+            'BTN_RS':        9,
         }
 
 # ── AUTO-DETECT ARDUINO SERIAL PORT ───────────────────────────
@@ -243,12 +248,14 @@ class RobotController:
             print(f"{GRN}✓ Network connection established{RST}")
 
         # State
-        self.speed       = 0
-        self.turn        = 0
-        self.jump        = 0
-        self.stopped     = False
-        self.turbo       = False
-        self.last_jump   = 0.0
+        self.speed           = 0
+        self.turn            = 0
+        self.jump            = 0
+        self.stopped         = False
+        self.turbo           = False
+        self.last_jump       = 0.0
+        self.hip_raise_held  = False   # True while R2 / Y held
+        self.hip_lower_held  = False   # True while L1 / LB held
 
         # Telemetry from Arduino
         self.tilt_angle  = 0.0
@@ -314,6 +321,20 @@ class RobotController:
         self.stopped = False
         self.arm()
         print(f"{GRN}Resumed{RST}")
+
+    def hip_up(self):
+        """Tell the Pi server to raise the hips one step."""
+        try:
+            self.ser.write(b"HIP:UP\n")
+        except Exception:
+            pass
+
+    def hip_dn(self):
+        """Tell the Pi server to lower the hips one step."""
+        try:
+            self.ser.write(b"HIP:DN\n")
+        except Exception:
+            pass
 
     def trigger_jump(self):
         now = time.time()
@@ -409,10 +430,12 @@ def main():
 
     # ── 3. Detect layout ─────────────────────────────────────
     mapping = detect_controller_mapping(js)
-    BTN_A     = mapping['BTN_A']
-    BTN_B     = mapping['BTN_B']
-    BTN_RB    = mapping['BTN_RB']
-    BTN_START = mapping['BTN_START']
+    BTN_A         = mapping['BTN_A']
+    BTN_B         = mapping['BTN_B']
+    BTN_RB        = mapping['BTN_RB']
+    BTN_START     = mapping['BTN_START']
+    BTN_HIP_RAISE = mapping['BTN_HIP_RAISE']
+    BTN_HIP_LOWER = mapping['BTN_HIP_LOWER']
 
     print(f"  Controller    : {GRN}{js.get_name()}{RST}  [{mapping['profile']} layout]")
     print(f"  Axes: {js.get_numaxes()}  Buttons: {js.get_numbuttons()}  Hats: {js.get_numhats()}\n")
@@ -437,6 +460,8 @@ def main():
         print("  Circle (○)      — Emergency stop")
         print("  Options         — Resume after stop / re-arm")
         print("  R1 (hold)       — Turbo mode (1.5×)")
+        print("  R2 (hold)       — Raise hips  ↑")
+        print("  L1 (hold)       — Lower hips  ↓")
     else:
         print(f"\n{BOLD}CONTROLS (Xbox):{RST}")
         print("  Left stick Y    — Forward / Backward")
@@ -445,10 +470,14 @@ def main():
         print("  B               — Emergency stop")
         print("  Start           — Resume after stop / re-arm")
         print("  RB (hold)       — Turbo mode (1.5×)")
+        print("  Y  (hold)       — Raise hips  ↑")
+        print("  LB (hold)       — Lower hips  ↓")
 
     print(f"\n{GRN}Running... (Ctrl+C to quit){RST}\n")
 
-    clock = pygame.time.Clock()
+    clock          = pygame.time.Clock()
+    hip_tick_count = 0
+    hip_send_every = max(1, LOOP_HZ // HIP_SEND_HZ)   # send hip every N loop ticks
 
     try:
         while True:
@@ -468,22 +497,32 @@ def main():
                     ctrl.resume()
 
                 elif event.type == pygame.JOYBUTTONDOWN:
-                    if event.button == BTN_A:         # Jump
+                    if event.button == BTN_A:             # Jump
                         if not ctrl.stopped:
                             ctrl.trigger_jump()
-                    elif event.button == BTN_B:       # Emergency stop
+                    elif event.button == BTN_B:           # Emergency stop
                         ctrl.stop()
                         print(f"\n{RED}EMERGENCY STOP{RST}")
-                    elif event.button == BTN_START:   # Resume / re-arm
+                    elif event.button == BTN_START:       # Resume / re-arm
                         ctrl.resume()
-                    elif event.button == BTN_RB:      # Turbo on
+                    elif event.button == BTN_RB:          # Turbo on
                         ctrl.turbo = True
+                    # Hip buttons — set hold flags
+                    if event.button == BTN_HIP_RAISE:
+                        ctrl.hip_raise_held = True
+                    if event.button == BTN_HIP_LOWER:
+                        ctrl.hip_lower_held = True
 
                 elif event.type == pygame.JOYBUTTONUP:
-                    if event.button == BTN_RB:        # Turbo off
+                    if event.button == BTN_RB:            # Turbo off
                         ctrl.turbo = False
-                    if event.button == BTN_A:         # Jump release
+                    if event.button == BTN_A:             # Jump release
                         ctrl.jump = 0
+                    # Hip buttons — clear hold flags
+                    if event.button == BTN_HIP_RAISE:
+                        ctrl.hip_raise_held = False
+                    if event.button == BTN_HIP_LOWER:
+                        ctrl.hip_lower_held = False
 
             if not ctrl.stopped:
                 raw_throttle = js.get_axis(AXIS_LY)
@@ -503,6 +542,16 @@ def main():
                 ctrl.turn  = 0
 
             ctrl.send_command()
+
+            # Send hip commands at HIP_SEND_HZ (throttled from main loop rate)
+            hip_tick_count += 1
+            if hip_tick_count >= hip_send_every:
+                hip_tick_count = 0
+                if ctrl.hip_raise_held:
+                    ctrl.hip_up()
+                elif ctrl.hip_lower_held:
+                    ctrl.hip_dn()
+
             print_status(ctrl)
 
             clock.tick(LOOP_HZ)

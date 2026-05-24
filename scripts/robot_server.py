@@ -14,14 +14,24 @@ import sys
 import socket
 import threading
 import time
-import signal
 import serial
 import serial.tools.list_ports
 import _bootstrap  # noqa: F401
 
+from src.drivers.feetech_servo import FeetechBus, FeetechServo
+from src.utils.config import load_config, default_feetech_device
+
 # ── CONFIGURATION ─────────────────────────────────────────────
 SERVER_PORT  = 9898
 SERIAL_BAUD  = 115200
+
+# ── HIP MOTION CONSTANTS ──────────────────────────────────────
+HIP_STEP        = 25    # raw ticks per command  (~2.2° per step)
+HIP_SPEED       = 400   # servo speed  (ticks/sec)
+HIP_ACC         = 25    # servo acceleration
+HIP_MAX_OFFSET  = 500   # max ticks from default pos in either direction (~44°)
+# If R2 raises when it should lower (or vice-versa), flip this to -1:
+HIP_RAISE_DIR   = +1
 
 # ── ANSI COLOURS ──────────────────────────────────────────────
 GRN  = '\033[92m'
@@ -58,6 +68,71 @@ def find_arduino_port() -> str | None:
             pass
     return None
 
+# ── HIP CONTROLLER ────────────────────────────────────────────
+class HipController:
+    """
+    Manages the two Feetech hip servos.
+    step(+1) = raise robot body, step(-1) = lower robot body.
+    Left and right are mechanically mirrored so they move in opposite
+    tick directions for the same physical motion.
+    """
+
+    def __init__(self, cfg: dict):
+        port     = default_feetech_device(cfg)
+        baudrate = cfg["hips"]["baudrate"]
+
+        self.bus = FeetechBus(port=port, baudrate=baudrate)
+        self.bus.open()
+
+        left_cfg  = cfg["hips"]["left"]
+        right_cfg = cfg["hips"]["right"]
+
+        self.left  = FeetechServo(self.bus, servo_id=left_cfg["id"])
+        self.right = FeetechServo(self.bus, servo_id=right_cfg["id"])
+
+        self.default_left  = left_cfg["default_pos"]
+        self.default_right = right_cfg["default_pos"]
+
+        # Read actual current positions as starting point
+        self.left_pos  = self.left.read_raw_position()
+        self.right_pos = self.right.read_raw_position()
+
+        print(f"{GRN}✓ Hip servos ready{RST}  "
+              f"(L:{self.left_pos} def:{self.default_left}  "
+              f"R:{self.right_pos} def:{self.default_right})")
+
+    def step(self, direction: int):
+        """
+        direction: +1 = raise, -1 = lower.
+        Left servo increases by step, right decreases by step for a raise
+        (they are mirrored so both move 'the same way' physically).
+        Flip HIP_RAISE_DIR at the top of this file if the sense is reversed.
+        """
+        d          = direction * HIP_RAISE_DIR
+        new_left   = self.left_pos  + d * HIP_STEP
+        new_right  = self.right_pos - d * HIP_STEP   # mirrored axis
+
+        # Clamp to ±HIP_MAX_OFFSET from each servo's default position
+        new_left  = max(self.default_left  - HIP_MAX_OFFSET,
+                        min(self.default_left  + HIP_MAX_OFFSET, new_left))
+        new_right = max(self.default_right - HIP_MAX_OFFSET,
+                        min(self.default_right + HIP_MAX_OFFSET, new_right))
+
+        try:
+            self.left.set_raw_position(new_left,  HIP_SPEED, HIP_ACC)
+            self.right.set_raw_position(new_right, HIP_SPEED, HIP_ACC)
+            self.left_pos  = new_left
+            self.right_pos = new_right
+        except Exception as e:
+            print(f"{YEL}Hip move error: {e}{RST}")
+
+    def close(self):
+        try:
+            self.bus.close()
+        except Exception:
+            pass
+
+
 # ── SERVER ────────────────────────────────────────────────────
 class RobotServer:
     """
@@ -69,6 +144,7 @@ class RobotServer:
         self.arduino_port = arduino_port
         self.listen_port  = listen_port
         self.ser          = None
+        self.hips         = None   # HipController, or None if Feetech unavailable
         self._client_conn = None
         self._client_lock = threading.Lock()
         self._running     = False
@@ -80,6 +156,15 @@ class RobotServer:
         time.sleep(2.0)           # let Arduino reset after DTR toggle
         self.ser.reset_input_buffer()
         print(f"{GRN}✓ Arduino serial open{RST}")
+
+        # Optional: open Feetech hip servo bus
+        try:
+            cfg = load_config()
+            self.hips = HipController(cfg)
+        except Exception as e:
+            print(f"{YEL}⚠ Hip servos not available: {e}{RST}")
+            print(f"  (R2/L1 hip buttons will be ignored)")
+            self.hips = None
 
         self._running = True
 
@@ -132,6 +217,8 @@ class RobotServer:
                 pass
             srv.close()
             self.ser.close()
+            if self.hips:
+                self.hips.close()
             print(f"{GRN}Done.{RST}")
 
     # ── Serial helpers ────────────────────────────────────────
@@ -163,7 +250,11 @@ class RobotServer:
 
     # ── Client → Arduino (blocking) ───────────────────────────
     def _client_to_arduino(self, conn: socket.socket):
-        """Read command lines from laptop and write them to Arduino serial."""
+        """
+        Read command lines from laptop.
+        HIP:UP / HIP:DN are handled here (Feetech bus).
+        Everything else is forwarded to the Arduino serial.
+        """
         buf = b''
         conn.settimeout(0.5)
         while self._running:
@@ -172,12 +263,24 @@ class RobotServer:
                 if not chunk:       # clean disconnect
                     break
                 buf += chunk
-                # Forward every complete line to Arduino
                 while b'\n' in buf:
                     line, buf = buf.split(b'\n', 1)
                     line = line.strip()
-                    if line:
+                    if not line:
+                        continue
+                    cmd = line.decode('utf-8', errors='ignore')
+
+                    # ── Hip commands (handled locally, NOT sent to Arduino) ──
+                    if cmd == 'HIP:UP':
+                        if self.hips:
+                            self.hips.step(+1)
+                    elif cmd == 'HIP:DN':
+                        if self.hips:
+                            self.hips.step(-1)
+                    else:
+                        # All other commands → Arduino serial
                         self._write_arduino(line + b'\n')
+
             except socket.timeout:
                 continue            # no data yet, keep waiting
             except (ConnectionResetError, BrokenPipeError):
