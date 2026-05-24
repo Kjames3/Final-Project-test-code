@@ -28,45 +28,41 @@ class TestBayesianOptimization(unittest.TestCase):
         self.assertAlmostEqual(x[1], 1.0, places=5)
 
     def test_optimizer_convergence(self):
-        """Verify that the BayesianOptimizer successfully converges on a mock parabolic cost minimum."""
-        # Mock balancing target minimum: kp_angle = 48.0, kd_angle = 2.2
-        target_kp = 48.0
-        target_kd = 2.2
-        
-        def evaluate_mock_cost(params):
-            kp = params["kp_angle"]
-            kd = params["kd_angle"]
-            # Parabolic cost bowl
-            return (kp - target_kp)**2 + 25.0 * (kd - target_kd)**2
+        """Verify the BayesianOptimizer converges on a 1-D Ks cost minimum (matches the live autotuner)."""
+        import random
+        random.seed(42)  # deterministic — the optimizer seeds exploration from random
 
-        # Initialize bounds
-        bounds = {
-            "kp_angle": (30.0, 65.0),
-            "kd_angle": (1.0, 4.0)
-        }
-        
+        # Mock balancing target minimum: ks = 9.0
+        target_ks = 9.0
+
+        def evaluate_mock_cost(params):
+            # Parabolic cost bowl over the single torque->PWM scalar
+            return (params["ks"] - target_ks) ** 2
+
+        # 1-D search bounds, matching AUTOTUNE_BOUNDS in the dashboard
+        bounds = {"ks": (3.0, 20.0)}
+
         optimizer = BayesianOptimizer(bounds, length_scale=0.3, noise=1e-4, kappa=1.5)
-        
-        # Test a sequence of 10 iterations
+
+        # Test a sequence of 12 iterations
         print("\nRunning Bayesian Optimization test iterations...")
-        for iteration in range(10):
+        for iteration in range(12):
             suggestion = optimizer.suggest()
             cost = evaluate_mock_cost(suggestion)
             optimizer.register(suggestion, cost)
-            print(f"  Iteration {iteration + 1:2d} | Suggested: Kp = {suggestion['kp_angle']:5.2f}, Kd = {suggestion['kd_angle']:4.2f} | Cost: {cost:6.2f}")
+            print(f"  Iteration {iteration + 1:2d} | Suggested: Ks = {suggestion['ks']:5.2f} | Cost: {cost:6.2f}")
 
         # Find the best registered set
         best_idx = optimizer.y.index(min(optimizer.y))
         best_params = optimizer.X_raw[best_idx]
         best_cost = optimizer.y[best_idx]
-        
+
         print(f"\n✓ Optimization Complete!")
-        print(f"  Target Minimum : Kp = {target_kp:.2f}, Kd = {target_kd:.2f}")
-        print(f"  Found Minimum  : Kp = {best_params['kp_angle']:.2f}, Kd = {best_params['kd_angle']:.2f} (Cost: {best_cost:.4f})")
-        
+        print(f"  Target Minimum : Ks = {target_ks:.2f}")
+        print(f"  Found Minimum  : Ks = {best_params['ks']:.2f} (Cost: {best_cost:.4f})")
+
         # Assert convergence is close to the minimum
-        self.assertTrue(abs(best_params["kp_angle"] - target_kp) < 3.5, "Kp did not converge close to target.")
-        self.assertTrue(abs(best_params["kd_angle"] - target_kd) < 0.35, "Kd did not converge close to target.")
+        self.assertTrue(abs(best_params["ks"] - target_ks) < 1.5, "Ks did not converge close to target.")
 
 
 if __name__ == '__main__':

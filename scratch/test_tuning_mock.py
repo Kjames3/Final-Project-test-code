@@ -29,10 +29,11 @@ mock_bridge.get_telemetry.return_value = {
     "age_sec": 0.05,
     "connected": True,
     "port": "/dev/ttyACM0",
-    "ack_kp_angle": 45.0,
-    "ack_kd_angle": 1.8,
-    "ack_kp_speed": 18.0,
-    "ack_ki_speed": 0.8,
+    "ack_kx": -63.25,
+    "ack_kv": -71.83,
+    "ack_kp": 345.33,
+    "ack_kd": 82.77,
+    "ack_ks": 7.8,
     "ack_balance_offset": 2.5
 }
 
@@ -87,17 +88,19 @@ class TestTuningDashboard(unittest.TestCase):
         self.assertIn("active", data)
         self.assertIn("acknowledged", data)
         
-        # Check defaults
-        self.assertEqual(data["active"]["kp_angle"], 45.0)
-        self.assertEqual(data["acknowledged"]["kp_angle"], 45.0)
+        # acknowledged comes from the (mocked) Arduino; active from loaded gains
+        self.assertEqual(data["acknowledged"]["kp"], 345.33)
+        self.assertIn("kx", data["active"])
+        self.assertIn("ks", data["active"])
 
     def test_post_gains_endpoint(self):
         """Verify that POST /api/gains updates gains, saves to disk, and pushes to Arduino."""
         new_gains = {
-            "kp_angle": 55.0,
-            "kd_angle": 2.2,
-            "kp_speed": 20.0,
-            "ki_speed": 1.0,
+            "kx": -60.0,
+            "kv": -70.0,
+            "kp": 350.0,
+            "kd": 85.0,
+            "ks": 8.1,
             "balance_offset": 2.8
         }
         
@@ -115,10 +118,11 @@ class TestTuningDashboard(unittest.TestCase):
         
         # Verify send_tuning_gains was called with correct values
         mock_bridge.send_tuning_gains.assert_called_once_with(
-            kp_a=55.0,
-            kd_a=2.2,
-            kp_s=20.0,
-            ki_s=1.0,
+            kx=-60.0,
+            kv=-70.0,
+            kp=350.0,
+            kd=85.0,
+            ks=8.1,
             b_o=2.8
         )
         
@@ -126,7 +130,7 @@ class TestTuningDashboard(unittest.TestCase):
         self.assertTrue(os.path.exists(TEST_GAINS_FILE))
         with open(TEST_GAINS_FILE, 'r') as f:
             saved_data = json.load(f)
-            self.assertEqual(saved_data["kp_angle"], 55.0)
+            self.assertEqual(saved_data["kp"], 350.0)
             self.assertEqual(saved_data["balance_offset"], 2.8)
 
     def test_control_endpoint(self):

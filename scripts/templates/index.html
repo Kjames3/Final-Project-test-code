@@ -570,8 +570,7 @@
                                     <thead>
                                         <tr style="background:var(--surface2); border-bottom:1px solid var(--border); color:var(--muted); text-transform:uppercase; letter-spacing:0.04em;">
                                             <th style="padding:0.45rem 0.625rem;">Iter</th>
-                                            <th style="padding:0.45rem 0.625rem;">Kp</th>
-                                            <th style="padding:0.45rem 0.625rem;">Kd</th>
+                                            <th style="padding:0.45rem 0.625rem;">Ks</th>
                                             <th style="padding:0.45rem 0.625rem;">Cost</th>
                                             <th style="padding:0.45rem 0.625rem; text-align:right;">Status</th>
                                         </tr>
@@ -847,10 +846,11 @@
                 jumpEl.style.color = d.jumping ? 'var(--accent)' : 'var(--muted)';
 
                 acknowledgedGains = {
-                    kp_angle: d.ack_kp_angle,
-                    kd_angle: d.ack_kd_angle,
-                    kp_speed: d.ack_kp_speed,
-                    ki_speed: d.ack_ki_speed,
+                    kx: d.ack_kx,
+                    kv: d.ack_kv,
+                    kp: d.ack_kp,
+                    kd: d.ack_kd,
+                    ks: d.ack_ks,
                     balance_offset: d.ack_balance_offset
                 };
                 Object.keys(currentGains).forEach(updateBadge);
@@ -920,10 +920,10 @@
                     progress.style.width = `${pct}%`;
                     iterText.textContent = `Trial ${state.iteration} / ${state.total_iterations}`;
                     
-                    if (state.current_gains.kp_angle > 0) {
-                        gainsText.textContent = `Kp: ${state.current_gains.kp_angle.toFixed(2)}, Kd: ${state.current_gains.kd_angle.toFixed(2)}`;
+                    if (state.current_gains.ks > 0) {
+                        gainsText.textContent = `Ks: ${state.current_gains.ks.toFixed(2)}`;
                     } else {
-                        gainsText.textContent = `Kp: --, Kd: --`;
+                        gainsText.textContent = `Ks: --`;
                     }
                     
                     // Render Logs with autoscroll
@@ -945,8 +945,7 @@
                         
                         tr.innerHTML = `
                             <td style="padding:0.45rem 0.625rem; font-weight:700;">${t.iteration}</td>
-                            <td style="padding:0.45rem 0.625rem; font-variant-numeric:tabular-nums;">${t.kp_angle.toFixed(2)}</td>
-                            <td style="padding:0.45rem 0.625rem; font-variant-numeric:tabular-nums;">${t.kd_angle.toFixed(2)}</td>
+                            <td style="padding:0.45rem 0.625rem; font-variant-numeric:tabular-nums;">${t.ks.toFixed(2)}</td>
                             <td style="padding:0.45rem 0.625rem; font-variant-numeric:tabular-nums; font-weight:600;">${t.cost === 9999 ? '9999 (Fall)' : t.cost.toFixed(1)}</td>
                             <td style="padding:0.45rem 0.625rem; text-align:right; font-weight:700; color:${color};">${t.status}</td>
                         `;

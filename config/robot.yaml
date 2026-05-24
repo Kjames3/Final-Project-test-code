@@ -50,3 +50,20 @@ wheels:
   right:
     id: 2                  # Motor 2 / Channel B
     direction: -1          # Direction multiplier (-1 = mirrored mounting)
+
+# ── BALANCE DYNAMICS (offline LQR gain design) 
+
+physical:
+  total_mass_kg:       2.5      # whole robot incl. all components
+  wheel_mass_kg:       0.10     # per wheel (drive motors live in chassis -> light wheels)
+  wheel_radius_m:      0.0325   # 65 mm diameter (firmware WHEEL_CIRC = 0.204 m)
+  com_height_m:        0.58     # axle -> chassis/COM, FULLY-EXTENDED stance (measured)
+  pitch_inertia_kgm2:  0.012    # chassis box about its own COM (small vs m·L²)
+
+  # LQR cost weights for state [x, xdot, pitch, pitch_rate] and input u
+  q_weights: [80.0, 20.0, 400.0, 25.0]
+  r_weight:  0.02
+
+  # torque (N·m) -> motor PWM (0–255). Seeded so the LQR pitch gain reproduces
+  # the known-good PID kpAngle≈45 PWM/deg response. TUNE THIS ON HARDWARE.
+  torque_to_pwm: 7.8

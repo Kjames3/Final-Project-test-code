@@ -27,10 +27,11 @@ os.makedirs(CONFIG_DIR, exist_ok=True)
 
 # Default nominal gains (matching Arduino defaults)
 DEFAULT_GAINS = {
-    "kp_angle": 45.0,
-    "kd_angle": 1.8,
-    "kp_speed": 18.0,
-    "ki_speed": 0.8,
+    "kx": -63.25,
+    "kv": -71.83,
+    "kp": 345.33,
+    "kd": 82.77,
+    "ks": 7.8,
     "balance_offset": 2.5
 }
 
@@ -38,10 +39,11 @@ DEFAULT_GAINS = {
 # This is loaded dynamically by the frontend to render appropriate control Sliders.
 # Adding or modifying parameters here automatically rebuilds the GUI!
 PARAMETER_SCHEMA = [
-    {"id": "kp_angle", "name": "Pitch P-Gain (Kp / kpAngle)", "min": 0.0, "max": 100.0, "step": 0.5, "desc": "Stiffness against tilting. Higher = stiffer response, too high = oscillations."},
-    {"id": "kd_angle", "name": "Pitch D-Gain (Kd / kdAngle)", "min": 0.0, "max": 10.0, "step": 0.1, "desc": "Damping factor on tilt rate. Higher = smooths out oscillations."},
-    {"id": "kp_speed", "name": "Speed P-Gain (Kv / kpSpeed)", "min": 0.0, "max": 50.0, "step": 0.5, "desc": "Proportional drive on wheel speed error. Controls velocity tracking."},
-    {"id": "ki_speed", "name": "Speed I-Gain (Ky / kiSpeed)", "min": 0.0, "max": 5.0, "step": 0.05, "desc": "Integral speed error. Acts as virtual position hold, keeping robot centered."},
+    {"id": "kp", "name": "Pitch Gain (Kp)", "min": 0.0, "max": 600.0, "step": 1.0, "desc": "LQR feedback on pitch angle (N·m/rad). Stiffness against tilting."},
+    {"id": "kd", "name": "Pitch-Rate Gain (Kd)", "min": 0.0, "max": 200.0, "step": 0.5, "desc": "LQR feedback on pitch rate (N·m per rad/s). Damps oscillations."},
+    {"id": "kv", "name": "Velocity Gain (Kv)", "min": -150.0, "max": 0.0, "step": 0.5, "desc": "LQR feedback on wheel velocity error (N·m per m/s). Usually negative."},
+    {"id": "kx", "name": "Position Gain (Kx)", "min": -150.0, "max": 0.0, "step": 0.5, "desc": "LQR feedback on position error (N·m/m). Keeps the robot centered. Usually negative."},
+    {"id": "ks", "name": "Torque→PWM Scale (Ks)", "min": 0.0, "max": 30.0, "step": 0.1, "desc": "Maps commanded torque to motor PWM. The main hardware-tuned knob."},
     {"id": "balance_offset", "name": "Upright Balance Offset (deg)", "min": -10.0, "max": 10.0, "step": 0.1, "desc": "Calibrates the zero position. Adjust so the robot stands stationary."}
 ]
 
@@ -86,10 +88,11 @@ def sync_gains_to_arduino():
         if conn and not last_synced_conn:
             print("→ Connection detected! Uploading active gains configuration to Arduino...")
             success = bridge.send_tuning_gains(
-                kp_a=active_gains["kp_angle"],
-                kd_a=active_gains["kd_angle"],
-                kp_s=active_gains["kp_speed"],
-                ki_s=active_gains["ki_speed"],
+                kx=active_gains["kx"],
+                kv=active_gains["kv"],
+                kp=active_gains["kp"],
+                kd=active_gains["kd"],
+                ks=active_gains["ks"],
                 b_o=active_gains["balance_offset"]
             )
             if success:
@@ -111,8 +114,7 @@ sync_thread.start()
 
 # Search bounds for active gains optimization
 AUTOTUNE_BOUNDS = {
-    "kp_angle": (30.0, 65.0),
-    "kd_angle": (1.0, 4.0)
+    "ks": (3.0, 20.0)
 }
 
 autotune_lock = threading.Lock()
@@ -124,7 +126,7 @@ autotune_state = {
     "status": "idle",       # "idle", "running", "paused_fallen", "completed", "cancelled"
     "iteration": 0,
     "total_iterations": 10,
-    "current_gains": {"kp_angle": 0.0, "kd_angle": 0.0},
+    "current_gains": {"ks": 0.0},
     "cost": 0.0,
     "logs": [],             # terminal logs sent to the browser
     "trials": []            # list of tested iterations
@@ -156,33 +158,31 @@ def set_autotune_iteration(iteration: int):
     with autotune_lock:
         autotune_state["iteration"] = iteration
 
-def set_autotune_current_gains(kp: float, kd: float):
+def set_autotune_current_gains(ks: float):
     with autotune_lock:
-        autotune_state["current_gains"] = {"kp_angle": kp, "kd_angle": kd}
+        autotune_state["current_gains"] = {"ks": ks}
 
 def set_autotune_cost(cost: float):
     with autotune_lock:
         autotune_state["cost"] = cost
 
-def register_trial_result(iteration: int, kp: float, kd: float, cost: float, status: str):
+def register_trial_result(iteration: int, ks: float, cost: float, status: str):
     with autotune_lock:
         autotune_state["trials"].append({
             "iteration": iteration,
-            "kp_angle": kp,
-            "kd_angle": kd,
+            "ks": ks,
             "cost": cost,
             "status": status
         })
 
-def save_trial_log_to_disk(iteration: int, kp: float, kd: float, cost: float, samples: list, status: str):
+def save_trial_log_to_disk(iteration: int, ks: float, cost: float, samples: list, status: str):
     logs_dir = os.path.join(CONFIG_DIR, "autotune_logs")
     os.makedirs(logs_dir, exist_ok=True)
     filepath = os.path.join(logs_dir, f"trial_{iteration}.json")
     try:
         trial_data = {
             "iteration": iteration,
-            "kp_angle": kp,
-            "kd_angle": kd,
+            "ks": ks,
             "cost": cost,
             "status": status,
             "samples": samples
@@ -241,33 +241,33 @@ def run_autotune_loop():
             
         # Get parameter suggestion
         suggestion = optimizer.suggest()
-        kp = round(suggestion["kp_angle"], 2)
-        kd = round(suggestion["kd_angle"], 2)
+        ks = round(suggestion["ks"], 2)
         
         # Prepare full gain set (keeping speed and offsets persistent)
         test_gains = active_gains.copy()
-        test_gains["kp_angle"] = kp
-        test_gains["kd_angle"] = kd
-        
-        log_msg(f"Testing gains: Kp = {kp}, Kd = {kd}")
-        set_autotune_current_gains(kp, kd)
+        test_gains["ks"] = ks
+
+        log_msg(f"Testing Ks = {ks}")
+        set_autotune_current_gains(ks)
         
         # Push gains to Arduino over Serial
         success = bridge.send_tuning_gains(
-            kp_a=test_gains["kp_angle"],
-            kd_a=test_gains["kd_angle"],
-            kp_s=test_gains["kp_speed"],
-            ki_s=test_gains["ki_speed"],
+            kx=test_gains["kx"],
+            kv=test_gains["kv"],
+            kp=test_gains["kp"],
+            kd=test_gains["kd"],
+            ks=test_gains["ks"],
             b_o=test_gains["balance_offset"]
         )
         if not success:
             log_msg("Failed to sync gains to Arduino. Retrying...", level="warning")
             time.sleep(0.5)
             bridge.send_tuning_gains(
-                kp_a=test_gains["kp_angle"],
-                kd_a=test_gains["kd_angle"],
-                kp_s=test_gains["kp_speed"],
-                ki_s=test_gains["ki_speed"],
+                kx=test_gains["kx"],
+                kv=test_gains["kv"],
+                kp=test_gains["kp"],
+                kd=test_gains["kd"],
+                ks=test_gains["ks"],
                 b_o=test_gains["balance_offset"]
             )
             
@@ -328,13 +328,13 @@ def run_autotune_loop():
         log_msg(f"Iteration {iteration} complete. Resulting Cost: {cost}")
         
         # Save raw logged samples to disk
-        save_trial_log_to_disk(iteration, kp, kd, cost, samples, status_lbl)
+        save_trial_log_to_disk(iteration, ks, cost, samples, status_lbl)
         
         # Register in Optimizer
-        optimizer.register({"kp_angle": kp, "kd_angle": kd}, cost)
+        optimizer.register({"ks": ks}, cost)
         
         # Register trial in state
-        register_trial_result(iteration, kp, kd, cost, status_lbl)
+        register_trial_result(iteration, ks, cost, status_lbl)
         
     # Post-Optimization: lock in the best gains
     if autotune_cancel_event.is_set():
@@ -346,23 +346,22 @@ def run_autotune_loop():
         best_params = optimizer.X_raw[best_idx]
         best_cost = optimizer.y[best_idx]
         
-        opt_kp = round(best_params["kp_angle"], 2)
-        opt_kd = round(best_params["kd_angle"], 2)
+        opt_ks = round(best_params["ks"], 2)
         
         log_msg("🎉 AUTO-TUNING COMPLETE!")
-        log_msg(f"Optimal gains found: Kp = {opt_kp}, Kd = {opt_kd} (Cost: {best_cost})")
+        log_msg(f"Optimal Ks = {opt_ks} (Cost: {best_cost})")
         
         # Update active gains and save to disk
-        active_gains["kp_angle"] = opt_kp
-        active_gains["kd_angle"] = opt_kd
+        active_gains["ks"] = opt_ks
         save_gains_to_disk(active_gains)
         
         # Push optimal gains to Arduino
         bridge.send_tuning_gains(
-            kp_a=active_gains["kp_angle"],
-            kd_a=active_gains["kd_angle"],
-            kp_s=active_gains["kp_speed"],
-            ki_s=active_gains["ki_speed"],
+            kx=active_gains["kx"],
+            kv=active_gains["kv"],
+            kp=active_gains["kp"],
+            kd=active_gains["kd"],
+            ks=active_gains["ks"],
             b_o=active_gains["balance_offset"]
         )
         
@@ -395,10 +394,11 @@ def handle_gains():
         response = {
             "active": active_gains,
             "acknowledged": {
-                "kp_angle": telemetry["ack_kp_angle"],
-                "kd_angle": telemetry["ack_kd_angle"],
-                "kp_speed": telemetry["ack_kp_speed"],
-                "ki_speed": telemetry["ack_ki_speed"],
+                "kx": telemetry["ack_kx"],
+                "kv": telemetry["ack_kv"],
+                "kp": telemetry["ack_kp"],
+                "kd": telemetry["ack_kd"],
+                "ks": telemetry["ack_ks"],
                 "balance_offset": telemetry["ack_balance_offset"]
             }
         }
@@ -416,10 +416,11 @@ def handle_gains():
             
             # Send gains to Arduino over Serial
             success = bridge.send_tuning_gains(
-                kp_a=new_gains["kp_angle"],
-                kd_a=new_gains["kd_angle"],
-                kp_s=new_gains["kp_speed"],
-                ki_s=new_gains["ki_speed"],
+                kx=new_gains["kx"],
+                kv=new_gains["kv"],
+                kp=new_gains["kp"],
+                kd=new_gains["kd"],
+                ks=new_gains["ks"],
                 b_o=new_gains["balance_offset"]
             )
             
@@ -482,7 +483,7 @@ def start_autotune():
             "status": "running",
             "iteration": 0,
             "total_iterations": 10,
-            "current_gains": {"kp_angle": 0.0, "kd_angle": 0.0},
+            "current_gains": {"ks": 0.0},
             "cost": 0.0,
             "logs": [],
             "trials": []

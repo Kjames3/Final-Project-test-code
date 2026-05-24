@@ -128,10 +128,11 @@ def main():
             
             # Load current gains if they exist
             active_gains = {
-                "kp_angle": 45.0,
-                "kd_angle": 1.8,
-                "kp_speed": 18.0,
-                "ki_speed": 0.8,
+                "kx": -63.25,
+                "kv": -71.83,
+                "kp": 345.33,
+                "kd": 82.77,
+                "ks": 7.8,
                 "balance_offset": 2.5
             }
             
