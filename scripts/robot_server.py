@@ -77,7 +77,6 @@ class RobotServer:
     def start(self):
         print(f"Opening Arduino on {self.arduino_port} @ {SERIAL_BAUD} baud …")
         self.ser = serial.Serial(self.arduino_port, SERIAL_BAUD, timeout=0.05)
-        self.ser.setTimeout(30)   # match Arduino Serial.setTimeout(30)
         time.sleep(2.0)           # let Arduino reset after DTR toggle
         self.ser.reset_input_buffer()
         print(f"{GRN}✓ Arduino serial open{RST}")
