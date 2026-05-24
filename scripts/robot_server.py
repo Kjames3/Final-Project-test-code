@@ -30,8 +30,11 @@ HIP_STEP        = 25    # raw ticks per command  (~2.2° per step)
 HIP_SPEED       = 400   # servo speed  (ticks/sec)
 HIP_ACC         = 25    # servo acceleration
 HIP_MAX_OFFSET  = 500   # max ticks from default pos in either direction (~44°)
-# If R2 raises when it should lower (or vice-versa), flip this to -1:
-HIP_RAISE_DIR   = +1
+# -1: left servo decreases / right servo increases for a raise command.
+# Both servos were near their mechanical extremes (L:3902, R:151), so +1
+# pushed them into the end-stop and caused overload.  Flip to +1 if the
+# robot moves in the wrong direction.
+HIP_RAISE_DIR   = -1
 
 # ── ANSI COLOURS ──────────────────────────────────────────────
 GRN  = '\033[92m'
@@ -77,6 +80,10 @@ class HipController:
     tick directions for the same physical motion.
     """
 
+    # Register addresses for overload recovery
+    _ADDR_TORQUE_ENABLE = 40
+    _ADDR_TORQUE_LIMIT  = 34
+
     def __init__(self, cfg: dict):
         port     = default_feetech_device(cfg)
         baudrate = cfg["hips"]["baudrate"]
@@ -93,6 +100,9 @@ class HipController:
         self.default_left  = left_cfg["default_pos"]
         self.default_right = right_cfg["default_pos"]
 
+        # Ensure torque is enabled and any previous overload latch is cleared
+        self._clear_error()
+
         # Read actual current positions as starting point
         self.left_pos  = self.left.read_raw_position()
         self.right_pos = self.right.read_raw_position()
@@ -101,16 +111,35 @@ class HipController:
               f"(L:{self.left_pos} def:{self.default_left}  "
               f"R:{self.right_pos} def:{self.default_right})")
 
+    def _clear_error(self):
+        """
+        Toggle torque-enable on both servos to clear any latched overload alarm.
+        Feetech STS servos latch the overload flag until torque is cycled.
+        """
+        for sid in [self.left.servo_id, self.right.servo_id]:
+            try:
+                self.bus.packet.write1ByteTxRx(sid, self._ADDR_TORQUE_ENABLE, 0)
+            except Exception:
+                pass
+        time.sleep(0.05)
+        for sid in [self.left.servo_id, self.right.servo_id]:
+            try:
+                self.bus.packet.write1ByteTxRx(sid, self._ADDR_TORQUE_ENABLE, 1)
+            except Exception:
+                pass
+
     def step(self, direction: int):
         """
         direction: +1 = raise, -1 = lower.
-        Left servo increases by step, right decreases by step for a raise
-        (they are mirrored so both move 'the same way' physically).
+        With HIP_RAISE_DIR = -1:
+          raise → left decreases (3902→3877), right increases (151→176)
+          lower → left increases (3902→3927), right decreases (151→126)
+        Both servos move AWAY from their default end-stop extremes on a raise.
         Flip HIP_RAISE_DIR at the top of this file if the sense is reversed.
         """
         d          = direction * HIP_RAISE_DIR
-        new_left   = self.left_pos  + d * HIP_STEP
-        new_right  = self.right_pos - d * HIP_STEP   # mirrored axis
+        new_left   = int(self.left_pos  + d * HIP_STEP)
+        new_right  = int(self.right_pos - d * HIP_STEP)   # mirrored axis
 
         # Clamp to ±HIP_MAX_OFFSET from each servo's default position
         new_left  = max(self.default_left  - HIP_MAX_OFFSET,
@@ -118,13 +147,22 @@ class HipController:
         new_right = max(self.default_right - HIP_MAX_OFFSET,
                         min(self.default_right + HIP_MAX_OFFSET, new_right))
 
-        try:
-            self.left.set_raw_position(new_left,  HIP_SPEED, HIP_ACC)
-            self.right.set_raw_position(new_right, HIP_SPEED, HIP_ACC)
-            self.left_pos  = new_left
-            self.right_pos = new_right
-        except Exception as e:
-            print(f"{YEL}Hip move error: {e}{RST}")
+        for attempt in range(2):
+            try:
+                self.left.set_raw_position(new_left,  HIP_SPEED, HIP_ACC)
+                self.right.set_raw_position(new_right, HIP_SPEED, HIP_ACC)
+                self.left_pos  = new_left
+                self.right_pos = new_right
+                return   # success
+            except IOError as e:
+                if 'Overload' in str(e) and attempt == 0:
+                    # Latch cleared — retry once
+                    print(f"{YEL}Hip overload — clearing alarm and retrying…{RST}")
+                    self._clear_error()
+                    time.sleep(0.1)
+                else:
+                    print(f"{YEL}Hip move error: {e}{RST}")
+                    return
 
     def close(self):
         try:

@@ -39,7 +39,7 @@ def read_status():
         return
 
     try:
-        bus = FeetechBus(port=port_name, baudrate=cfg["serial"]["baudrate"])
+        bus = FeetechBus(port=port_name, baudrate=cfg["hips"]["baudrate"])
         bus.open()
     except Exception as e:
         print(f"✗ Failed to open port {port_name}: {e}")
