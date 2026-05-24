@@ -328,7 +328,7 @@ def main():
         print(f"  [{CYAN}1{RESET}] 🏎️  {BOLD}Wheel Motors Calibration Test{RESET}   (spins wheels, reads encoders)")
         print(f"  [{CYAN}2{RESET}] 🧭  {BOLD}IMU Attitude & Balance Monitor{RESET}  (real-time pitch graph indicator)")
         print(f"  [{CYAN}3{RESET}] 🧍  {BOLD}Safe Stance Posture Lock{RESET}        (aligns leg links, locks torque)")
-        print(f"  [{CYAN}4{RESET}] 🎮  {BOLD}Xbox Bluetooth Manual Control{RESET}   (requires connected controller)")
+        print(f"  [{CYAN}4{RESET}] 🎮  {BOLD}Remote Controller Server{RESET}        (laptop sends PS4/Xbox over Wi-Fi)")
         print(f"  [{CYAN}5{RESET}] 📊  {BOLD}LQR/PID Web-Based Tuning Server{RESET} (hosts glassmorphic dashboard)")
         print(f"  [{CYAN}6{RESET}] 🔄  {BOLD}Feetech Servo Cyclic Stress Test{RESET} (cycles hip servos ±90 deg)")
         print(f"  [{CYAN}7{RESET}] 📈  {BOLD}Real-Time Terminal Telemetry Feed{RESET}(live sensor table in terminal)")
@@ -345,7 +345,7 @@ def main():
         elif choice == '3':
             launch_script("scripts/default_stance.py", feetech_port, "Safe Stance Posture Lock")
         elif choice == '4':
-            launch_script("scripts/bluetooth_controller.py", arduino_port, "Xbox Bluetooth Manual Control")
+            launch_script("scripts/robot_server.py", arduino_port, "Remote Controller Server")
         elif choice == '5':
             launch_dashboard("scripts/tuning_dashboard.py", arduino_port)
         elif choice == '6':

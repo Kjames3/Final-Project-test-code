@@ -12,6 +12,7 @@ os.environ.setdefault('SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS', '1')
 import pygame
 import serial
 import serial.tools.list_ports
+import socket
 import sys
 import time
 import threading
@@ -20,6 +21,7 @@ import _bootstrap  # noqa: F401
 # ── CONFIGURATION ─────────────────────────────────────────────
 SERIAL_BAUD     = 115200
 SERIAL_TIMEOUT  = 0.1
+SERVER_PORT     = 9898         # TCP port that robot_server.py listens on
 LOOP_HZ         = 50          # how often we send commands
 DEADZONE        = 0.08        # stick dead zone (0.0 - 1.0)
 MAX_SPEED       = 255         # max motor PWM (reduce to limit speed)
@@ -56,6 +58,73 @@ RED  = '\033[91m'
 CYN  = '\033[96m'
 RST  = '\033[0m'
 BOLD = '\033[1m'
+
+# ── NETWORK SERIAL (replaces serial.Serial when --host is used) ─
+class NetworkSerial:
+    """
+    Drop-in replacement for serial.Serial that tunnels over TCP.
+    Connects to robot_server.py running on the Raspberry Pi.
+    Exposes the same interface used by RobotController:
+        .write(bytes), .readline() -> bytes, .in_waiting -> int, .close()
+    """
+
+    def __init__(self, host: str, port: int = SERVER_PORT):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.connect((host, port))
+        self._sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self._buf      = b''
+        self._buf_lock = threading.Lock()
+        self._alive    = True
+
+        # Background thread fills _buf from the socket
+        t = threading.Thread(target=self._recv_loop, daemon=True)
+        t.start()
+
+    def _recv_loop(self):
+        while self._alive:
+            try:
+                data = self._sock.recv(4096)
+                if not data:
+                    self._alive = False
+                    break
+                with self._buf_lock:
+                    self._buf += data
+            except Exception:
+                self._alive = False
+                break
+
+    # ── serial.Serial interface ──────────────────────────────
+    @property
+    def in_waiting(self) -> int:
+        with self._buf_lock:
+            return len(self._buf)
+
+    def readline(self) -> bytes:
+        """Block until a newline-terminated line arrives (100 ms timeout)."""
+        deadline = time.time() + 0.1
+        while time.time() < deadline:
+            with self._buf_lock:
+                idx = self._buf.find(b'\n')
+                if idx >= 0:
+                    line = self._buf[:idx + 1]
+                    self._buf = self._buf[idx + 1:]
+                    return line
+            time.sleep(0.005)
+        return b''
+
+    def write(self, data: bytes):
+        try:
+            self._sock.sendall(data)
+        except Exception:
+            pass
+
+    def close(self):
+        self._alive = False
+        try:
+            self._sock.close()
+        except Exception:
+            pass
+
 
 # ── CONTROLLER PROFILE DETECTION ──────────────────────────────
 def detect_controller_mapping(joystick) -> dict:
@@ -158,11 +227,20 @@ def wait_for_controller(timeout=CONTROLLER_WAIT):
 
 # ── MAIN CONTROLLER CLASS ─────────────────────────────────────
 class RobotController:
-    def __init__(self, serial_port):
-        self.ser = serial.Serial(serial_port, SERIAL_BAUD,
-                                 timeout=SERIAL_TIMEOUT)
-        time.sleep(2.0)  # Wait for Arduino to boot / reset
-        print(f"{GRN}✓ Serial connected: {serial_port}{RST}")
+    def __init__(self, ser_or_port):
+        """
+        Accept either:
+          • a port string  → opens serial.Serial directly (local mode)
+          • a NetworkSerial or serial.Serial instance → use as-is (remote mode)
+        """
+        if isinstance(ser_or_port, str):
+            self.ser = serial.Serial(ser_or_port, SERIAL_BAUD,
+                                     timeout=SERIAL_TIMEOUT)
+            time.sleep(2.0)  # let Arduino reset after DTR toggle
+            print(f"{GRN}✓ Serial connected: {ser_or_port}{RST}")
+        else:
+            self.ser = ser_or_port   # NetworkSerial already connected
+            print(f"{GRN}✓ Network connection established{RST}")
 
         # State
         self.speed       = 0
@@ -273,17 +351,46 @@ def main():
     print("  UCR MEDDL Lab")
     print(f"{'='*58}{RST}\n")
 
-    # ── 1. Find Arduino ──────────────────────────────────────
-    if len(sys.argv) > 1:
-        port = sys.argv[1]
-    else:
-        port = find_arduino_port()
+    # ── 1. Parse arguments ───────────────────────────────────
+    # Supported forms:
+    #   bluetooth_controller.py                      → auto-detect Arduino serial
+    #   bluetooth_controller.py /dev/ttyACM0         → explicit serial port
+    #   bluetooth_controller.py --host 192.168.1.50  → connect to robot_server.py on Pi
+    #   bluetooth_controller.py --host 192.168.1.50 --port 9898
+    import argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--host', default=None,
+                        help='IP address of Raspberry Pi running robot_server.py')
+    parser.add_argument('--port', type=int, default=SERVER_PORT,
+                        help=f'TCP port (default {SERVER_PORT})')
+    parser.add_argument('serial_port', nargs='?', default=None,
+                        help='Serial port for direct Arduino connection')
+    args, _ = parser.parse_known_args()
 
-    if port is None:
-        print(f"{RED}ERROR: Arduino not found on any serial port.")
-        print(f"  Check USB cable and ensure the Arduino sketch is flashed.{RST}")
-        sys.exit(1)
-    print(f"  Arduino port  : {GRN}{port}{RST}")
+    network_mode = args.host is not None
+
+    if network_mode:
+        # ── Network mode: connect to Pi robot_server.py ──────
+        print(f"  Mode          : {CYN}Network → {args.host}:{args.port}{RST}")
+        try:
+            ser = NetworkSerial(args.host, args.port)
+            print(f"{GRN}✓ Connected to robot server at {args.host}:{args.port}{RST}")
+        except ConnectionRefusedError:
+            print(f"{RED}ERROR: Connection refused at {args.host}:{args.port}")
+            print(f"  Make sure robot_server.py is running on the Pi.{RST}")
+            sys.exit(1)
+        except OSError as e:
+            print(f"{RED}ERROR: Could not connect to {args.host}:{args.port} — {e}{RST}")
+            sys.exit(1)
+    else:
+        # ── Direct serial mode ───────────────────────────────
+        port = args.serial_port or find_arduino_port()
+        if port is None:
+            print(f"{RED}ERROR: Arduino not found on any serial port.")
+            print(f"  Check USB cable, or use --host <pi-ip> for network mode.{RST}")
+            sys.exit(1)
+        print(f"  Mode          : {GRN}Direct serial → {port}{RST}")
+        ser = port   # RobotController will open it
 
     # ── 2. Init pygame & wait for controller ─────────────────
     pygame.init()
@@ -310,11 +417,11 @@ def main():
     print(f"  Controller    : {GRN}{js.get_name()}{RST}  [{mapping['profile']} layout]")
     print(f"  Axes: {js.get_numaxes()}  Buttons: {js.get_numbuttons()}  Hats: {js.get_numhats()}\n")
 
-    # ── 4. Connect to Arduino ─────────────────────────────────
+    # ── 4. Connect to Arduino (via serial or network) ────────
     try:
-        ctrl = RobotController(port)
+        ctrl = RobotController(ser)
     except serial.SerialException as e:
-        print(f"{RED}ERROR: Could not open {port}: {e}{RST}")
+        print(f"{RED}ERROR: Could not open serial port: {e}{RST}")
         pygame.quit()
         sys.exit(1)
 
