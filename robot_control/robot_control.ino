@@ -33,21 +33,24 @@
 #include <SCServo.h>
 
 // ── TUNING PARAMETERS ─────────────────────────────────────────
-// Adjust these to tune the balance and response
-
-// LQR / Balance gains (initially set to nominal, tunable dynamically)
-float kpAngle       = 45.0;  // Proportional gain on tilt angle
-float kdAngle       = 1.8;   // Derivative gain on tilt rate
-float kpSpeed       = 18.0;  // Proportional gain on speed error
-float kiSpeed       = 0.8;   // Integral gain on speed error
+// LQR state-feedback gains from scripts/compute_lqr_gain.py.
+// State x = [posErr (m), velErr (m/s), pitch (rad), pitchRate (rad/s)]
+// Output: tau (N·m) = Kx·posErr + Kv·velErr + Kp·pitch + Kd·pitchRate
+// PWM = Ks · tau  (Ks in PWM per N·m — the main hardware-tuning knob)
+// Signs: Kp,Kd > 0 (lean forward → drive forward); Kx,Kv < 0 (resist drift)
+float Kx =  -63.2456;   // position-error gain  (N·m/m)
+float Kv =  -71.8334;   // velocity-error gain  (N·m per m/s)
+float Kp =  345.3348;   // pitch gain           (N·m/rad)
+float Kd =   82.7683;   // pitch-rate gain      (N·m per rad/s)
+float Ks =    7.8;      // torque→PWM scalar    (PWM per N·m) — TUNE ON HARDWARE
 
 // Tilt offset (degrees) — tune so robot stands upright without moving
 // Positive = robot leans forward, Negative = leans back
-float balanceOffset = 2.5;
+float balanceOffset = 1.4;
 
 // Max robot speed from controller (motor PWM units 0-255)
 #define MAX_SPEED      180
-#define MAX_TURN        80
+#define MAX_TURN       130   // raised from 80 — gives enough differential to overcome motor stiction
 
 // Fall detection — stop motors if tilted too far
 #define FALL_ANGLE      35.0   // degrees
@@ -94,7 +97,7 @@ float tiltRate     = 0.0;   // degrees/sec
 float speedL       = 0.0;   // m/s left wheel
 float speedR       = 0.0;   // m/s right wheel
 float speedAvg     = 0.0;   // average forward speed
-float speedInteg   = 0.0;   // speed error integral
+float posErr       = 0.0;   // integral of velocity error = position-error state x[0]
 long  prevEncL     = 0;
 long  prevEncR     = 0;
 
@@ -251,25 +254,25 @@ void updateSpeed(float dt) {
 }
 
 // ── LQR BALANCE CONTROLLER ────────────────────────────────────
-// Returns base PWM output (applied to both motors for balance)
+// Full-state feedback: x = [posErr (m), velErr (m/s), pitch (rad), pitchRate (rad/s)]
+// tau (N·m) = K · x  →  PWM = Ks · tau
+// Signs match the lean-to-catch convention: Kp,Kd > 0; Kx,Kv < 0.
 int balanceControl(float dt) {
-  // Target speed from controller (map -255..255 to m/s target)
-  float targetSpeed = (float)cmdSpeed / 255.0 * 1.5;  // max 1.5 m/s
+  // Velocity setpoint from controller (-255..255 → ±1.5 m/s)
+  float vTarget = (float)cmdSpeed / 255.0 * 1.5;
+  float velErr  = speedAvg - vTarget;
 
-  // Speed error
-  float speedError = speedAvg - targetSpeed;
-  speedInteg += speedError * dt;
-  speedInteg = constrain(speedInteg, -50.0, 50.0);  // anti-windup
+  // Position-error state = integral of velocity error, with anti-windup clamp
+  posErr += velErr * dt;
+  posErr  = constrain(posErr, -0.5, 0.5);
 
-  // Error angle (add balance offset so robot stands upright)
-  // NOTE: speed error terms are SUBTRACTED — when going faster than target
-  // the robot must lean backward (reduce angleError), not forward.
-  float angleError = (tiltAngle - balanceOffset)
-                   - kpSpeed  * speedError
-                   - kiSpeed  * speedInteg;
+  // Angle states in SI radians so the offline-solved K applies verbatim
+  float pitch     = (tiltAngle - balanceOffset) * 0.0174533;  // deg → rad
+  float pitchRate = tiltRate                    * 0.0174533;  // deg/s → rad/s
 
-  // PD on angle
-  int output = (int)(kpAngle * angleError + kdAngle * tiltRate);
+  // LQR state feedback → wheel torque (N·m), scaled to motor PWM
+  float tau  = Kx * posErr + Kv * velErr + Kp * pitch + Kd * pitchRate;
+  int output = (int)(Ks * tau);
   return constrain(output, -255, 255);
 }
 
@@ -297,7 +300,7 @@ void updateJump() {
 //   "START\n"                                          — arm the robot
 //   "ESTOP\n"                                          — emergency stop, disarm
 //   "CMD:<speed>:<turn>:<jump>\n"                      — motion command
-//   "TUN:<kpAngle>:<kdAngle>:<kpSpeed>:<kiSpeed>:<balanceOffset>\n" — tune gains
+//   "TUN:<Kx>:<Kv>:<Kp>:<Kd>:<Ks>:<balanceOffset>\n"   — set LQR gains
 void parseSerial() {
   if (!Serial.available()) return;
 
@@ -306,7 +309,7 @@ void parseSerial() {
 
   if (line == "START") {
     // Reset control state for a clean start
-    speedInteg = 0.0;
+    posErr = 0.0;
     fallen     = false;
     jumping    = false;
     cmdSpeed   = 0;
@@ -321,7 +324,7 @@ void parseSerial() {
     running    = false;
     jumping    = false;
     cmdJump    = false;
-    speedInteg = 0.0;
+    posErr = 0.0;
     stopMotors();
     Serial.println("STOPPED");
     return;
@@ -348,33 +351,30 @@ void parseSerial() {
       cmdJump = false;
     }
   } else if (line.startsWith("TUN:")) {
-    // Parse TUN:<kpAngle>:<kdAngle>:<kpSpeed>:<kiSpeed>:<balanceOffset>
+    // Parse TUN:<Kx>:<Kv>:<Kp>:<Kd>:<Ks>:<balanceOffset>
     int idx1 = line.indexOf(':', 4);
     int idx2 = line.indexOf(':', idx1 + 1);
     int idx3 = line.indexOf(':', idx2 + 1);
     int idx4 = line.indexOf(':', idx3 + 1);
+    int idx5 = line.indexOf(':', idx4 + 1);
 
-    if (idx1 < 0 || idx2 < 0 || idx3 < 0 || idx4 < 0) return;
+    if (idx1 < 0 || idx2 < 0 || idx3 < 0 || idx4 < 0 || idx5 < 0) return;
 
-    float kpA = line.substring(4, idx1).toFloat();
-    float kdA = line.substring(idx1 + 1, idx2).toFloat();
-    float kpS = line.substring(idx2 + 1, idx3).toFloat();
-    float kiS = line.substring(idx3 + 1, idx4).toFloat();
-    float bO  = line.substring(idx4 + 1).toFloat();
-
-    kpAngle = kpA;
-    kdAngle = kdA;
-    kpSpeed = kpS;
-    kiSpeed = kiS;
-    balanceOffset = bO;
+    Kx = line.substring(4,      idx1).toFloat();
+    Kv = line.substring(idx1+1, idx2).toFloat();
+    Kp = line.substring(idx2+1, idx3).toFloat();
+    Kd = line.substring(idx3+1, idx4).toFloat();
+    Ks = line.substring(idx4+1, idx5).toFloat();
+    balanceOffset = line.substring(idx5+1).toFloat();
 
     // Send confirmation back
     Serial.print("TUN_ACK:");
-    Serial.print(kpAngle, 2); Serial.print(":");
-    Serial.print(kdAngle, 2); Serial.print(":");
-    Serial.print(kpSpeed, 2); Serial.print(":");
-    Serial.print(kiSpeed, 2); Serial.print(":");
-    Serial.println(balanceOffset, 2);
+    Serial.print(Kx, 4); Serial.print(":");
+    Serial.print(Kv, 4); Serial.print(":");
+    Serial.print(Kp, 4); Serial.print(":");
+    Serial.print(Kd, 4); Serial.print(":");
+    Serial.print(Ks, 4); Serial.print(":");
+    Serial.println(balanceOffset, 4);
   }
 }
 
@@ -492,7 +492,7 @@ void loop() {
   if (abs(tiltAngle - balanceOffset) > FALL_ANGLE) {
     fallen = true;
     stopMotors();
-    speedInteg = 0.0;
+    posErr = 0.0;
   } else {
     fallen = false;
   }

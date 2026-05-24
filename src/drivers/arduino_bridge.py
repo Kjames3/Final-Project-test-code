@@ -38,11 +38,12 @@ class ArduinoBridge:
         self._last_received = 0.0
         self._is_connected = False
 
-        # Tuning State Variables (acknowledged by Arduino)
-        self._ack_kp_angle = 0.0
-        self._ack_kd_angle = 0.0
-        self._ack_kp_speed = 0.0
-        self._ack_ki_speed = 0.0
+        # Tuning State Variables (acknowledged by Arduino) — LQR gains
+        self._ack_kx = 0.0
+        self._ack_kv = 0.0
+        self._ack_kp = 0.0
+        self._ack_kd = 0.0
+        self._ack_ks = 0.0
         self._ack_balance_offset = 0.0
 
         # IMU raw axes (in physical units: g and °/s)
@@ -126,12 +127,21 @@ class ArduinoBridge:
         with self._state_lock:
             return self._is_connected
 
-    def send_tuning_gains(self, kp_a: float, kd_a: float, kp_s: float, ki_s: float, b_o: float) -> bool:
-        """Send tuning gains packet to the Arduino."""
+    def send_tuning_gains(self, kx: float, kv: float, kp: float, kd: float, ks: float, b_o: float) -> bool:
+        """Send LQR tuning gains packet to the Arduino.
+
+        Args:
+            kx:  Position-error gain  (N·m/m)
+            kv:  Velocity-error gain  (N·m per m/s)
+            kp:  Pitch gain           (N·m/rad)
+            kd:  Pitch-rate gain      (N·m per rad/s)
+            ks:  Torque→PWM scalar    (PWM per N·m)
+            b_o: Balance offset       (degrees)
+        """
         if not self.is_connected():
             return False
-        
-        cmd = f"TUN:{kp_a:.3f}:{kd_a:.3f}:{kp_s:.3f}:{ki_s:.3f}:{b_o:.3f}\n"
+
+        cmd = f"TUN:{kx:.4f}:{kv:.4f}:{kp:.4f}:{kd:.4f}:{ks:.4f}:{b_o:.4f}\n"
         with self._write_lock:
             if self.ser is None or not self.ser.is_open:
                 return False
@@ -226,10 +236,11 @@ class ArduinoBridge:
                 "age_sec":          time.time() - self._last_received if self._last_received > 0 else float("inf"),
                 "connected":        self._is_connected,
                 "port":             self.port,
-                "ack_kp_angle":     self._ack_kp_angle,
-                "ack_kd_angle":     self._ack_kd_angle,
-                "ack_kp_speed":     self._ack_kp_speed,
-                "ack_ki_speed":     self._ack_ki_speed,
+                "ack_kx":             self._ack_kx,
+                "ack_kv":             self._ack_kv,
+                "ack_kp":             self._ack_kp,
+                "ack_kd":             self._ack_kd,
+                "ack_ks":             self._ack_ks,
                 "ack_balance_offset": self._ack_balance_offset,
                 # IMU axes — g and °/s
                 "accel_x": self._accel_x,
@@ -317,21 +328,23 @@ class ArduinoBridge:
             pass
 
     def _parse_tuning_ack(self, line: str) -> None:
-        """Parse packet in format: 'TUN_ACK:<kpAngle>:<kdAngle>:<kpSpeed>:<kiSpeed>:<balanceOffset>'."""
+        """Parse LQR ack packet: 'TUN_ACK:<kx>:<kv>:<kp>:<kd>:<ks>:<balanceOffset>'."""
         parts = line[8:].split(":")
-        if len(parts) >= 5:
+        if len(parts) >= 6:
             try:
-                kp_a = float(parts[0])
-                kd_a = float(parts[1])
-                kp_s = float(parts[2])
-                ki_s = float(parts[3])
-                b_o = float(parts[4])
-                
+                kx  = float(parts[0])
+                kv  = float(parts[1])
+                kp  = float(parts[2])
+                kd  = float(parts[3])
+                ks  = float(parts[4])
+                b_o = float(parts[5])
+
                 with self._state_lock:
-                    self._ack_kp_angle = kp_a
-                    self._ack_kd_angle = kd_a
-                    self._ack_kp_speed = kp_s
-                    self._ack_ki_speed = ki_s
+                    self._ack_kx             = kx
+                    self._ack_kv             = kv
+                    self._ack_kp             = kp
+                    self._ack_kd             = kd
+                    self._ack_ks             = ks
                     self._ack_balance_offset = b_o
             except ValueError:
                 pass

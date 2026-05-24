@@ -126,13 +126,14 @@ def main():
             # Ensure config dir exists
             os.makedirs(config_dir, exist_ok=True)
             
-            # Load current gains if they exist
+            # Load current gains if they exist (LQR defaults match config/lqr_gains.json)
             active_gains = {
-                "kp_angle": 45.0,
-                "kd_angle": 1.8,
-                "kp_speed": 18.0,
-                "ki_speed": 0.8,
-                "balance_offset": 2.5
+                "kx": -63.2456,
+                "kv": -71.8334,
+                "kp": 345.3348,
+                "kd": 82.7683,
+                "ks": 7.8,
+                "balance_offset": 1.4
             }
             
             if os.path.exists(gains_file):
