@@ -262,9 +262,11 @@ int balanceControl(float dt) {
   speedInteg = constrain(speedInteg, -50.0, 50.0);  // anti-windup
 
   // Error angle (add balance offset so robot stands upright)
+  // NOTE: speed error terms are SUBTRACTED — when going faster than target
+  // the robot must lean backward (reduce angleError), not forward.
   float angleError = (tiltAngle - balanceOffset)
-                   + kpSpeed  * speedError
-                   + kiSpeed  * speedInteg;
+                   - kpSpeed  * speedError
+                   - kiSpeed  * speedInteg;
 
   // PD on angle
   int output = (int)(kpAngle * angleError + kdAngle * tiltRate);
@@ -405,6 +407,7 @@ void sendTelemetry() {
 // ── SETUP ─────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);  // USB serial to RPi
+  Serial.setTimeout(30); // Short timeout so readStringUntil() never blocks the balance loop
 
   // Motor pins
   pinMode(PIN_AIN1, OUTPUT);
