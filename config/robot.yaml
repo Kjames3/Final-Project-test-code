@@ -29,7 +29,7 @@ feetech:
     max_rad: 1.5708
   right:
     id: 2
-    default_pos: 297
+    default_pos: 4063
     offset_rad: 0.0
     direction: -1
     min_rad: -1.5708
