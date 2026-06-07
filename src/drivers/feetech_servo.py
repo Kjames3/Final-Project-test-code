@@ -18,6 +18,15 @@ ADDR_GOAL_POSITION = 42
 ADDR_PRESENT_POSITION = 56
 ADDR_LOCK = 55
 
+# Servo status error bits (reported in every response packet).
+# These are servo-internal diagnostic flags; communication can still succeed
+# even when they are set, and position data returned is still valid.
+ERRBIT_VOLTAGE  = 0x01  # input voltage out of range
+ERRBIT_ANGLE    = 0x02  # position sensor error
+ERRBIT_OVERHEAT = 0x04  # motor/driver over-temperature
+ERRBIT_OVERELE  = 0x08  # electrical overload (high current) — transient on hard hold
+ERRBIT_OVERLOAD = 0x20  # mechanical overload / stall
+
 # Feetech STS/SCS: 0..4095 ticks span 360 degrees, center at 2048.
 TICKS_PER_REV = 4096
 TICKS_PER_RAD = TICKS_PER_REV / (2 * math.pi)
@@ -104,6 +113,23 @@ class FeetechServo:
         )
         _check(self.bus.packet, result, error, f"read_raw_position servo {self.servo_id}")
         return ticks
+
+    def read_raw_position_safe(self) -> tuple[int, int]:
+        """Read position without raising on servo status flags.
+
+        Returns:
+            (ticks, error_bits) — position is valid even when error_bits != 0.
+            Raises IOError only on a real communication failure.
+        """
+        ticks, result, error = self.bus.packet.read2ByteTxRx(
+            self.servo_id, ADDR_PRESENT_POSITION
+        )
+        if result != COMM_SUCCESS:
+            raise IOError(
+                f"read_raw_position servo {self.servo_id}: "
+                f"{self.bus.packet.getTxRxResult(result)}"
+            )
+        return ticks, error
 
     def set_raw_position(self, ticks: int, speed: int = 0, acc: int = 0) -> None:
         result, error = self.bus.packet.WritePosEx(

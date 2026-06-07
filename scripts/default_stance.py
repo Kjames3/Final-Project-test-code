@@ -8,7 +8,7 @@ import sys
 import time
 import _bootstrap  # noqa: F401
 
-from src.drivers.feetech_servo import FeetechBus, FeetechServo
+from src.drivers.feetech_servo import FeetechBus, FeetechServo, ERRBIT_OVERELE, ERRBIT_OVERHEAT, ERRBIT_OVERLOAD, ERRBIT_VOLTAGE, ERRBIT_ANGLE
 from src.utils.config import default_feetech_device, load_config
 
 # Movement parameters — conservative speed to avoid slamming parallel linkage
@@ -142,13 +142,32 @@ def set_default_positions():
     if motors_moved:
         print("\n  Waiting for motors to settle …")
         wait_until_stopped(bus, motors_moved)
+        # Brief pause: motors remain electrically loaded immediately after
+        # stopping — wait for current draw to normalise before reading status.
+        time.sleep(0.75)
 
     # Post-move verification read
+    # Uses read_raw_position_safe() so that servo status flags (e.g. OverEle)
+    # are reported as diagnostics rather than masking the actual final position.
+    _ERRBIT_LABELS = [
+        (ERRBIT_VOLTAGE,  "Input voltage out of range"),
+        (ERRBIT_ANGLE,    "Position sensor error"),
+        (ERRBIT_OVERHEAT, "Motor over-temperature"),
+        (ERRBIT_OVERELE,  "Electrical overload (high current — normal on heavy hold)"),
+        (ERRBIT_OVERLOAD, "Mechanical overload / stall"),
+    ]
     try:
-        m1_final = left_servo.read_raw_position()
-        m2_final = right_servo.read_raw_position()
+        m1_final, m1_errbits = left_servo.read_raw_position_safe()
+        m2_final, m2_errbits = right_servo.read_raw_position_safe()
         print(f"\n  Motor {m1_id} final: {m1_final} ({raw_to_deg(m1_final):.1f}°)")
         print(f"  Motor {m2_id} final: {m2_final} ({raw_to_deg(m2_final):.1f}°)")
+
+        for sid, errbits in [(m1_id, m1_errbits), (m2_id, m2_errbits)]:
+            if errbits:
+                for bit, label in _ERRBIT_LABELS:
+                    if errbits & bit:
+                        severity = "ℹ" if bit == ERRBIT_OVERELE else "⚠"
+                        print(f"  {severity}  Motor {sid} status: {label}")
     except Exception as e:
         print(f"\n  ⚠ Verification read failed: {e}")
 
