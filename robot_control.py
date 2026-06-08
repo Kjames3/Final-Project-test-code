@@ -17,7 +17,7 @@ from typing import List, Tuple, Optional
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from src.drivers.arduino_bridge import ArduinoBridge
-from src.utils.config import load_config, default_serial_device, default_feetech_device
+from src.utils.config import load_config, default_serial_device
 
 # ── ANSI COLORS & STYLES ───────────────────────────────────────────
 CLR_ESC = "\033["
@@ -120,21 +120,16 @@ def print_header():
 {DARK_GRAY}========================================================================={RESET}"""
     print(banner)
 
-def print_port_status(arduino_port: str, feetech_port: str, scanned: List[Tuple[str, str, str]]):
+def print_port_status(arduino_port: str, scanned: List[Tuple[str, str, str]]):
     """Display active port mappings and connection health indicators."""
     print(f"{BOLD}⚙️  SYSTEM HARDWARE CONNECTIONS:{RESET}")
-    
-    # Render Arduino status
+
     arduino_scanned = any(p[0] == arduino_port for p in scanned)
     arduino_lbl = f"{GREEN}● ACTIVE ({arduino_port}){RESET}" if arduino_scanned else f"{RED}○ NOT DETECTED ({arduino_port}){RESET}"
-    
-    # Render Feetech status
-    feetech_scanned = any(p[0] == feetech_port for p in scanned)
-    feetech_lbl = f"{GREEN}● ACTIVE ({feetech_port}){RESET}" if feetech_scanned else f"{RED}○ NOT DETECTED ({feetech_port}){RESET}"
 
-    print(f"  ├─ {BOLD}Arduino Board Port{RESET} : {arduino_lbl}")
-    print(f"  └─ {BOLD}Feetech Bus Port  {RESET} : {feetech_lbl}")
-    
+    print(f"  └─ {BOLD}Arduino Uno R3{RESET} : {arduino_lbl}")
+    print(f"       (wheels · IMU · BLS3355 hip servos on D3/D11)")
+
     if len(scanned) > 0:
         print(f"\n  {GRAY}Available Serial Devices Found:{RESET}")
         for dev, desc, _ in scanned:
@@ -266,75 +261,62 @@ def launch_dashboard(script_path: str, port_arg: str):
     input()
 
 # ── MENU CONTROLLER ────────────────────────────────────────────────
-def configure_ports(arduino_port: str, feetech_port: str, scanned: List[Tuple[str, str, str]]) -> Tuple[str, str]:
-    """Interactively re-assign ports."""
+def configure_ports(arduino_port: str, scanned: List[Tuple[str, str, str]]) -> str:
+    """Interactively re-assign the Arduino port."""
     clear_screen()
     print_header()
     print(f"{CYAN}{BOLD}⚙️  MANUAL PORT CONFIGURATION MANAGER{RESET}\n")
-    
+
     print("Scanned Ports:")
     for idx, (dev, desc, _) in enumerate(scanned):
         print(f"  [{idx + 1}] {BOLD}{dev}{RESET} : {desc}")
     print(f"  [E] Enter manually")
-    
-    # Configure Arduino
-    ans_a = input(f"\nSelect Arduino Uno R3 port number (current: {arduino_port}): ").strip()
-    if ans_a.lower() == 'e':
+
+    ans = input(f"\nSelect Arduino Uno R3 port number (current: {arduino_port}): ").strip()
+    if ans.lower() == 'e':
         arduino_port = input("Enter Arduino port path (e.g. /dev/ttyACM1): ").strip()
     else:
         try:
-            val = int(ans_a)
+            val = int(ans)
             if 1 <= val <= len(scanned):
                 arduino_port = scanned[val - 1][0]
         except ValueError:
-            pass  # keep current
+            pass
 
-    # Configure Feetech
-    ans_f = input(f"Select Feetech Motor Bus port number (current: {feetech_port}): ").strip()
-    if ans_f.lower() == 'e':
-        feetech_port = input("Enter Feetech port path (e.g. /dev/ttyACM0): ").strip()
-    else:
-        try:
-            val = int(ans_f)
-            if 1 <= val <= len(scanned):
-                feetech_port = scanned[val - 1][0]
-        except ValueError:
-            pass  # keep current
-            
-    return arduino_port, feetech_port
+    return arduino_port
 
 def main():
-    # Load configuration values to discover Feetech defaults
     try:
         cfg = load_config()
-        cfg_feetech_port = default_feetech_device(cfg)
+        arduino_port = default_serial_device(cfg)
     except Exception:
-        cfg_feetech_port = "/dev/ttyACM1"
+        arduino_port = "/dev/ttyACM0"
 
-    # Scan and detect ports
+    # Detect port from scan
     scanned_ports = scan_serial_ports()
-    arduino_port, feetech_port = detect_device_assignments(scanned_ports, cfg_feetech_port)
+    for dev, desc, hwid in scanned_ports:
+        if any(k in (desc + hwid).lower() for k in ['arduino', 'ch340', 'uno', '2341:0043']):
+            arduino_port = dev
+            break
 
     while True:
-        # Refresh ports list and status on every loop return
         scanned_ports = scan_serial_ports()
-        
+
         clear_screen()
         print_header()
-        print_port_status(arduino_port, feetech_port, scanned_ports)
+        print_port_status(arduino_port, scanned_ports)
 
-        # Draw Menu
         print(f"{BOLD}💡 MAIN HUB MENU — SELECT AN ACTION:{RESET}")
         print(f"  [{CYAN}1{RESET}] 🏎️  {BOLD}Wheel Motors Calibration Test{RESET}   (spins wheels, reads encoders)")
         print(f"  [{CYAN}2{RESET}] 🧭  {BOLD}IMU Attitude & Balance Monitor{RESET}  (real-time pitch graph indicator)")
-        print(f"  [{CYAN}3{RESET}] 🧍  {BOLD}Safe Stance Posture Lock{RESET}        (aligns leg links, locks torque)")
+        print(f"  [{CYAN}3{RESET}] 🧍  {BOLD}Default Hip Stance{RESET}              (moves hip servos to default position)")
         print(f"  [{CYAN}4{RESET}] 🎮  {BOLD}Remote Controller Server{RESET}        (laptop sends PS4/Xbox over Wi-Fi)")
-        print(f"  [{CYAN}5{RESET}] 📊  {BOLD}LQR/PID Web-Based Tuning Server{RESET} (hosts glassmorphic dashboard)")
-        print(f"  [{CYAN}6{RESET}] 🔄  {BOLD}Feetech Servo Cyclic Stress Test{RESET} (cycles hip servos ±90 deg)")
+        print(f"  [{CYAN}5{RESET}] 📊  {BOLD}LQR/PID Web-Based Tuning Server{RESET} (hosts tuning dashboard)")
+        print(f"  [{CYAN}6{RESET}] 🔧  {BOLD}BLS Servo Diagnostics{RESET}           (test hip servo PWM commands)")
         print(f"  [{CYAN}7{RESET}] 📈  {BOLD}Real-Time Terminal Telemetry Feed{RESET}(live sensor table in terminal)")
         print(f"  [{CYAN}8{RESET}] ⚖️   {BOLD}Calibrate Upright Pitch Offset{RESET}  (finds zero-torque balance point)")
-        print(f"  [{CYAN}9{RESET}] ⚙️   {BOLD}Configure USB Serial Ports{RESET}       (manually assign ports)")
-        print(f"  [{CYAN}10{RESET}] ❌  {BOLD}Exit Central Controller{RESET}\n")
+        print(f"  [{CYAN}9{RESET}] ⚙️   {BOLD}Configure USB Serial Port{RESET}        (manually assign Arduino port)")
+        print(f"  [{CYAN}10{RESET}] ❌  {BOLD}Exit{RESET}\n")
 
         choice = input(f"{BOLD}Enter choice [1-10]: {RESET}").strip()
 
@@ -343,22 +325,22 @@ def main():
         elif choice == '2':
             launch_script("scripts/test_imu.py", arduino_port, "IMU Attitude & Balance Monitor")
         elif choice == '3':
-            launch_script("scripts/default_stance.py", feetech_port, "Safe Stance Posture Lock")
+            launch_script("scripts/default_stance.py", arduino_port, "Default Hip Stance")
         elif choice == '4':
             launch_script("scripts/robot_server.py", arduino_port, "Remote Controller Server")
         elif choice == '5':
             launch_dashboard("scripts/tuning_dashboard.py", arduino_port)
         elif choice == '6':
-            launch_script("scripts/test_feetech_motor.py", feetech_port, "Feetech Servo Cyclic Stress Test")
+            launch_script("scripts/set_motor_angle.py", arduino_port, "BLS Servo Diagnostics")
         elif choice == '7':
             run_diagnostic_telemetry(arduino_port)
         elif choice == '8':
             launch_script("scripts/calibrate_balance_offset.py", arduino_port, "Calibrate Upright Pitch Offset")
         elif choice == '9':
-            arduino_port, feetech_port = configure_ports(arduino_port, feetech_port, scanned_ports)
+            arduino_port = configure_ports(arduino_port, scanned_ports)
         elif choice == '10':
             clear_screen()
-            print(f"\n{GREEN}{BOLD}Goodbye! Keep on jumping!{RESET}\n")
+            print(f"\n{GREEN}{BOLD}Goodbye!{RESET}\n")
             sys.exit(0)
         else:
             print(f"\n{RED}✗ Invalid choice. Press ENTER to retry.{RESET}")
