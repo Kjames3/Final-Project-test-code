@@ -1,48 +1,55 @@
-"""Feetech STS/SCS servo driver — exposes set/read_angle in radians."""
+"""Feetech STS/SCS servo driver — exposes set/read_angle in radians.
+
+Uses the installed scservo_sdk (pip install ftservo-python-sdk), which
+ships sms_sts — a protocol_packet_handler subclass with the port already
+bound and STS-specific helpers like WritePosEx.
+"""
 
 import math
-import sys
 from typing import Optional
 
 try:
     from scservo_sdk import sms_sts, PortHandler, COMM_SUCCESS
 except ImportError as e:
     raise ImportError(
-        "scservo_sdk not found. Install with `pip install ftservo-python-sdk` "
-        "(the import name `scservo_sdk` is NOT on PyPI under that name)."
+        "scservo_sdk not found. Install with:\n"
+        "  pip install ftservo-python-sdk\n"
+        "If you are using the bundled Feetech-Servo-SDK in the repo, that version\n"
+        "does not include sms_sts. Use the pip package instead."
     ) from e
 
 
-ADDR_ID = 5
-ADDR_GOAL_POSITION = 42
+# ── Register addresses ───────────────────────────────────────────────────────
+ADDR_ID               = 5
+ADDR_GOAL_POSITION    = 42
 ADDR_PRESENT_POSITION = 56
-ADDR_LOCK = 55
+ADDR_LOCK             = 55
 
-# Servo status error bits (reported in every response packet).
-# These are servo-internal diagnostic flags; communication can still succeed
-# even when they are set, and position data returned is still valid.
-ERRBIT_VOLTAGE  = 0x01  # input voltage out of range
-ERRBIT_ANGLE    = 0x02  # position sensor error
-ERRBIT_OVERHEAT = 0x04  # motor/driver over-temperature
-ERRBIT_OVERELE  = 0x08  # electrical overload (high current) — transient on hard hold
-ERRBIT_OVERLOAD = 0x20  # mechanical overload / stall
+# ── Servo status error bits ──────────────────────────────────────────────────
+# These flags appear in every response status byte.
+# Communication can succeed and position data can still be valid even when set.
+ERRBIT_VOLTAGE  = 0x01   # input voltage out of range
+ERRBIT_ANGLE    = 0x02   # position sensor error
+ERRBIT_OVERHEAT = 0x04   # motor/driver over-temperature
+ERRBIT_OVERELE  = 0x08   # electrical overload (high current) — transient on hard hold
+ERRBIT_OVERLOAD = 0x20   # mechanical overload / stall
 
-# Feetech STS/SCS: 0..4095 ticks span 360 degrees, center at 2048.
+# ── Geometry ─────────────────────────────────────────────────────────────────
 TICKS_PER_REV = 4096
 TICKS_PER_RAD = TICKS_PER_REV / (2 * math.pi)
-CENTER_TICK = 2048
+CENTER_TICK   = 2048
 
 
 class FeetechBus:
     """Owns a single serial bus shared by multiple servos."""
 
-    def __init__(self, port: str, baudrate: int = 1000000):
+    def __init__(self, port: str, baudrate: int = 1_000_000):
         self.port_name = port
-        self.baudrate = baudrate
-        self.port = PortHandler(port)
-        # sms_sts is the STS/SMS protocol handler in ftservo-python-sdk.
-        self.packet = sms_sts(self.port)
-        self._open = False
+        self.baudrate  = baudrate
+        self.port      = PortHandler(port)
+        # sms_sts binds the port internally; all subsequent calls need no port arg.
+        self.packet    = sms_sts(self.port)
+        self._open     = False
 
     def open(self) -> None:
         if not self.port.openPort():
@@ -66,7 +73,7 @@ class FeetechBus:
 
 
 class FeetechServo:
-    """Single servo on a shared bus, addressed in radians."""
+    """Single servo on a shared FeetechBus, addressed in radians."""
 
     def __init__(
         self,
@@ -77,21 +84,25 @@ class FeetechServo:
         min_rad: float = -math.pi,
         max_rad: float = math.pi,
     ):
-        self.bus = bus
-        self.servo_id = servo_id
+        self.bus        = bus
+        self.servo_id   = servo_id
         self.offset_rad = offset_rad
-        self.direction = 1 if direction >= 0 else -1
-        self.min_rad = min_rad
-        self.max_rad = max_rad
+        self.direction  = 1 if direction >= 0 else -1
+        self.min_rad    = min_rad
+        self.max_rad    = max_rad
+
+    # ── angle ↔ tick conversion ──────────────────────────────────────────────
 
     def _angle_to_ticks(self, angle_rad: float) -> int:
         clamped = max(self.min_rad, min(self.max_rad, angle_rad))
-        signed = self.direction * (clamped + self.offset_rad)
+        signed  = self.direction * (clamped + self.offset_rad)
         return int(round(CENTER_TICK + signed * TICKS_PER_RAD))
 
     def _ticks_to_angle(self, ticks: int) -> float:
         signed = (ticks - CENTER_TICK) / TICKS_PER_RAD
         return self.direction * signed - self.offset_rad
+
+    # ── angle API ────────────────────────────────────────────────────────────
 
     def set_angle(self, angle_rad: float) -> None:
         ticks = self._angle_to_ticks(angle_rad)
@@ -106,6 +117,8 @@ class FeetechServo:
         )
         _check(self.bus.packet, result, error, f"read_angle servo {self.servo_id}")
         return self._ticks_to_angle(ticks)
+
+    # ── raw-tick API ─────────────────────────────────────────────────────────
 
     def read_raw_position(self) -> int:
         ticks, result, error = self.bus.packet.read2ByteTxRx(
@@ -131,12 +144,27 @@ class FeetechServo:
             )
         return ticks, error
 
-    def set_raw_position(self, ticks: int, speed: int = 0, acc: int = 0) -> None:
+    def set_raw_position(self, ticks: int, speed: int = 0, acc: int = 0) -> int:
+        """Move to absolute tick position with speed and acceleration ramp.
+
+        Uses sms_sts.WritePosEx() which writes a 7-byte packet to registers
+        41-47: [acc, pos_lo, pos_hi, time_lo, time_hi, spd_lo, spd_hi].
+
+        Returns the raw error/status byte from the servo response so the caller
+        can inspect persistent flags (voltage, overheat, overload) without the
+        move being aborted.  Only raises on a real communication failure.
+        """
         result, error = self.bus.packet.WritePosEx(
             self.servo_id, ticks, speed, acc
         )
-        _check(self.bus.packet, result, error, f"set_raw_position servo {self.servo_id}")
+        if result != COMM_SUCCESS:
+            raise IOError(
+                f"set_raw_position servo {self.servo_id}: "
+                f"{self.bus.packet.getTxRxResult(result)}"
+            )
+        return error
 
+    # ── admin ────────────────────────────────────────────────────────────────
 
     def write_id(self, new_id: int) -> None:
         """Reassign this servo's ID. Power-cycle to apply."""
@@ -157,6 +185,8 @@ class FeetechServo:
         )
         self.servo_id = new_id
 
+
+# ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _check(packet, comm_result, error, ctx: str) -> None:
     if comm_result != COMM_SUCCESS:

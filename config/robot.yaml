@@ -14,7 +14,7 @@ arduino:
 # ── FEETECH HIGH-TORQUE HIP JOINTS BUS ──────────────────────────────────
 # Manages multi-turn STS series daisy-chained hip joint bus servos.
 feetech:
-  device_linux: /dev/ttyACM1
+  device_linux: /dev/ttyACM0
   device_win: COM2
   device_mac: /dev/tty.usbserial2
   baudrate: 1000000
@@ -22,14 +22,14 @@ feetech:
   # Individual joint parameters
   left:
     id: 1
-    default_pos: 3747
+    default_pos: 3636
     offset_rad: 0.0
     direction: 1
     min_rad: -1.5708
     max_rad: 1.5708
   right:
     id: 2
-    default_pos: 4063
+    default_pos: 4070
     offset_rad: 0.0
     direction: -1
     min_rad: -1.5708
