@@ -25,9 +25,8 @@ SERVER_PORT     = 9898         # TCP port that robot_server.py listens on
 LOOP_HZ         = 50          # how often we send commands
 DEADZONE        = 0.08        # stick dead zone (0.0 - 1.0)
 MAX_SPEED       = 255         # max motor PWM (reduce to limit speed)
-MAX_TURN        = 255         # max turn PWM — full range so Arduino sees up to MAX_TURN ticks
+MAX_TURN        = 255         # max turn PWM
 TURBO_FACTOR    = 1.5         # speed multiplier when RB/R1 held
-JUMP_COOLDOWN   = 2.0         # seconds between jumps
 CONTROLLER_WAIT = 30          # seconds to wait for a controller to appear
 HIP_SEND_HZ     = 10          # how often to send hip commands while button held
 
@@ -41,7 +40,7 @@ AXIS_RT         = 5   # R2 / RT       (-1=off,   +1=full)
 
 # ── BUTTON INDICES — resolved at runtime by detect_controller_mapping() ──
 # Defaults are Xbox One / 360 layout
-BTN_A           = 0   # A / Cross       → Jump
+BTN_A           = 0   # A / Cross       → Arm / Resume
 BTN_B           = 1   # B / Circle      → Emergency stop
 BTN_X           = 2   # X / Square
 BTN_Y           = 3   # Y / Triangle
@@ -250,10 +249,8 @@ class RobotController:
         # State
         self.speed           = 0
         self.turn            = 0
-        self.jump            = 0
         self.stopped         = False
         self.turbo           = False
-        self.last_jump       = 0.0
         self.hip_raise_held  = False   # True while R2 / Y held
         self.hip_lower_held  = False   # True while L1 / LB held
 
@@ -291,7 +288,7 @@ class RobotController:
 
     def send_command(self):
         """Send CMD packet to Arduino."""
-        cmd = f"CMD:{self.speed}:{self.turn}:{self.jump}\n"
+        cmd = f"CMD:{self.speed}:{self.turn}:0\n"
         try:
             self.ser.write(cmd.encode())
         except serial.SerialException:
@@ -309,7 +306,6 @@ class RobotController:
         """Emergency stop — zero command + ESTOP."""
         self.speed = 0
         self.turn  = 0
-        self.jump  = 0
         self.send_command()
         try:
             self.ser.write(b"ESTOP\n")
@@ -336,15 +332,6 @@ class RobotController:
         except Exception:
             pass
 
-    def trigger_jump(self):
-        now = time.time()
-        if (now - self.last_jump) < JUMP_COOLDOWN:
-            remaining = JUMP_COOLDOWN - (now - self.last_jump)
-            print(f"\r{YEL}Jump cooldown: {remaining:.1f}s{RST}  ")
-            return
-        self.last_jump = now
-        self.jump = 1
-        print(f"\r{CYN}JUMP!{RST}  ")
 
     def close(self):
         self.running = False
@@ -354,15 +341,14 @@ class RobotController:
 
 # ── PRINT STATUS ──────────────────────────────────────────────
 def print_status(ctrl):
-    fallen_str  = f"{RED}FALLEN{RST}"   if ctrl.fallen  else f"{GRN}OK{RST}"
-    jumping_str = f"{CYN}JUMP{RST}"    if ctrl.jumping else "    "
-    stopped_str = f"{RED}STOPPED{RST}" if ctrl.stopped else "      "
-    turbo_str   = f"{YEL}TURBO{RST}"   if ctrl.turbo   else "     "
+    fallen_str  = f"{RED}FALLEN{RST}"   if ctrl.fallen  else f"{GRN}BALANCING{RST}"
+    stopped_str = f"{RED}STOPPED{RST}" if ctrl.stopped else ""
+    turbo_str   = f"{YEL}TURBO{RST}"   if ctrl.turbo   else ""
 
     print(f"\r{BOLD}Tilt:{RST}{ctrl.tilt_angle:+6.1f}°  "
           f"{BOLD}Spd:{RST}{ctrl.robot_speed:+6.1f}cm/s  "
           f"{BOLD}CMD S:{RST}{ctrl.speed:+4d} T:{ctrl.turn:+4d}  "
-          f"{fallen_str} {jumping_str} {stopped_str} {turbo_str}  ",
+          f"{fallen_str} {stopped_str} {turbo_str}  ",
           end='', flush=True)
 
 # ── MAIN ──────────────────────────────────────────────────────
@@ -456,9 +442,9 @@ def main():
         print(f"\n{BOLD}CONTROLS (PS4/PS5):{RST}")
         print("  Left stick Y    — Forward / Backward")
         print("  Right stick X   — Turn left / right")
-        print("  Cross (✕)       — Jump")
+        print("  Cross (✕)       — Arm / Resume after stop")
         print("  Circle (○)      — Emergency stop")
-        print("  Options         — Resume after stop / re-arm")
+        print("  Options         — Arm / Resume after stop")
         print("  R1 (hold)       — Turbo mode (1.5×)")
         print("  R2 (hold)       — Raise hips  ↑")
         print("  L1 (hold)       — Lower hips  ↓")
@@ -466,9 +452,9 @@ def main():
         print(f"\n{BOLD}CONTROLS (Xbox):{RST}")
         print("  Left stick Y    — Forward / Backward")
         print("  Right stick X   — Turn left / right")
-        print("  A               — Jump")
+        print("  A               — Arm / Resume after stop")
         print("  B               — Emergency stop")
-        print("  Start           — Resume after stop / re-arm")
+        print("  Start           — Arm / Resume after stop")
         print("  RB (hold)       — Turbo mode (1.5×)")
         print("  Y  (hold)       — Raise hips  ↑")
         print("  LB (hold)       — Lower hips  ↓")
@@ -497,9 +483,8 @@ def main():
                     ctrl.resume()
 
                 elif event.type == pygame.JOYBUTTONDOWN:
-                    if event.button == BTN_A:             # Jump
-                        if not ctrl.stopped:
-                            ctrl.trigger_jump()
+                    if event.button == BTN_A:             # Arm / Resume
+                        ctrl.resume()
                     elif event.button == BTN_B:           # Emergency stop
                         ctrl.stop()
                         print(f"\n{RED}EMERGENCY STOP{RST}")
@@ -516,8 +501,6 @@ def main():
                 elif event.type == pygame.JOYBUTTONUP:
                     if event.button == BTN_RB:            # Turbo off
                         ctrl.turbo = False
-                    if event.button == BTN_A:             # Jump release
-                        ctrl.jump = 0
                     # Hip buttons — clear hold flags
                     if event.button == BTN_HIP_RAISE:
                         ctrl.hip_raise_held = False

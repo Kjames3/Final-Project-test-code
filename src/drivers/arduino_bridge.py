@@ -154,6 +154,32 @@ class ArduinoBridge:
                     self._is_connected = False
                 return False
 
+    def send_servo(self, servo_id: int, pulse_us: int) -> bool:
+        """Send a PWM pulse-width command to a BLS3355 hip servo.
+
+        Args:
+            servo_id:  1 = left hip (D3), 2 = right hip (D11)
+            pulse_us:  Pulse width in microseconds (500–2500).
+                       500 = 0°, 1500 = 135° neutral, 2500 = 270°
+
+        Returns True if the command was written successfully.
+        """
+        pulse_us = max(500, min(2500, int(pulse_us)))
+        if not self.is_connected():
+            return False
+        cmd = f"SRV:{servo_id}:{pulse_us}\n"
+        with self._write_lock:
+            if self.ser is None or not self.ser.is_open:
+                return False
+            try:
+                self.ser.write(cmd.encode('utf-8'))
+                self.ser.flush()
+                return True
+            except Exception:
+                with self._state_lock:
+                    self._is_connected = False
+                return False
+
     def send_arm(self) -> bool:
         """Send START command to arm the robot (exits idle/READY state)."""
         if not self.is_connected():

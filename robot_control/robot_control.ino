@@ -3,34 +3,34 @@
 // UCR MEDDL Lab
 // ================================================================
 // PIN MAP:
-//  D2  - Left encoder A  (INT0 hardware interrupt)
-//  D3~ - AT8236 AIN2     (left motor direction 2)
-//  D4  - AT8236 AIN1     (left motor direction 1)
-//  D5~ - AT8236 PWMA     (left motor speed)
-//  D6~ - AT8236 PWMB     (right motor speed)
-//  D7  - AT8236 BIN1     (right motor direction 1)
-//  D8  - Left encoder B
-//  D9~ - AT8236 BIN2     (right motor direction 2)
-//  D10 - URT-2 TX (SoftwareSerial)
-//  D11 - URT-2 RX (SoftwareSerial)
-//  D12 - Right encoder A
-//  D13 - Right encoder B
-//  A4  - MPU6050 SDA
-//  A5  - MPU6050 SCL
+//  D2  - Right encoder B (direction)
+//  D3~ - BLS3355 Left hip servo PWM  (OC2B / Timer 2)  ← NEW
+//  D4  - Left encoder B (direction)
+//  D5~ - AT8236 BIN1  (right motor PWM, Timer 0 OC0B)
+//  D6~ - AT8236 BIN2  (right motor PWM, Timer 0 OC0A)
+//  D7  - Right encoder A (interrupt via PCINT2)
+//  D8  - Left encoder A  (interrupt via PCINT0)
+//  D9~ - AT8236 AIN1  (left motor PWM, Timer 1 OC1A)
+//  D10~- AT8236 AIN2  (left motor PWM, Timer 1 OC1B)
+//  D11~- BLS3355 Right hip servo PWM (OC2A / Timer 2) ← NEW
+//  A4  - MPU6050 SDA (I2C)
+//  A5  - MPU6050 SCL (I2C)
 // ================================================================
-// REQUIRED LIBRARIES (install via Arduino IDE Library Manager):
-//   1. Wire.h         — built-in (I2C for MPU6050)
-//   2. SoftwareSerial — built-in
-//   3. SCServo        — search "SCServo" by FEETECH in Library Manager
+// SERVO NOTE: Servo.h cannot be used — it steals Timer 1, which
+//   is needed for analogWrite on D9/D10 (motor control).
+//   Instead, Timer 2 CTC ISR generates 50 Hz servo pulses on D3/D11.
+//   ISR tick: 20 μs  (prescaler=8, OCR2A=39)
+//   Pulse range: 500–2500 μs (25–125 ticks), frame: 1000 ticks = 20 ms
+// ================================================================
+// REQUIRED LIBRARIES:
+//   1. Wire.h — built-in (I2C for MPU6050)
 // ================================================================
 // BEFORE FIRST RUN:
-//   - Set FEETECH servo baud rate to 115200 using URT-2 + PC software
-//   - Set servo IDs: left hip = 1, right hip = 2
 //   - Calibrate BALANCE_OFFSET so robot stands straight
+//   - Verify hip neutral pulse widths (SERVO_NEUTRAL_US default 1500)
 // ================================================================
 
 #include <Wire.h>
-#include <SCServo.h>
 
 // ── TUNING PARAMETERS ─────────────────────────────────────────
 // LQR state-feedback gains from scripts/compute_lqr_gain.py.
@@ -73,16 +73,55 @@ float balanceOffset = 1.4;
 #define LOOP_HZ         200    // balance loop frequency
 #define LOOP_US         (1000000 / LOOP_HZ)
 
-// ── PIN DEFINITIONS (aligned with Assembly.md physical wiring) ────
+// ── PIN DEFINITIONS ───────────────────────────────────────────────
 #define PIN_ENC_L_A     8      // PCINT0 (Port B)
 #define PIN_ENC_L_B     4
 #define PIN_ENC_R_A     7      // PCINT2 (Port D)
 #define PIN_ENC_R_B     2
 
-#define PIN_AIN1        9      // Left Motor PWM Direction 1 (OC1A)
-#define PIN_AIN2        10     // Left Motor PWM Direction 2 (OC1B)
-#define PIN_BIN1        5      // Right Motor PWM Direction 1 (OC0B)
-#define PIN_BIN2        6      // Right Motor PWM Direction 2 (OC0A)
+#define PIN_AIN1        9      // Left Motor PWM Direction 1 (OC1A / Timer 1)
+#define PIN_AIN2        10     // Left Motor PWM Direction 2 (OC1B / Timer 1)
+#define PIN_BIN1        5      // Right Motor PWM Direction 1 (OC0B / Timer 0)
+#define PIN_BIN2        6      // Right Motor PWM Direction 2 (OC0A / Timer 0)
+
+#define SERVO_PIN_LEFT  3      // BLS3355 left hip  (OC2B / Timer 2)
+#define SERVO_PIN_RIGHT 11     // BLS3355 right hip (OC2A / Timer 2)
+
+// ── SERVO PWM (Timer 2 ISR, 20 μs tick) ───────────────────────────
+// Tick period: (OCR2A+1) * prescaler / F_CPU = 40 * 8 / 16e6 = 20 μs
+// Servo frame: 1000 ticks = 20 ms (50 Hz)
+// Pulse range: 25 ticks (500 μs) to 125 ticks (2500 μs)
+#define SERVO_MIN_US      500
+#define SERVO_MAX_US      2500
+#define SERVO_NEUTRAL_US  1500
+#define SERVO_FRAME_TICKS 1000   // 20 ms
+
+// Pulse widths commanded by RPi (μs). Written from main loop, read by ISR.
+// uint16_t writes are NOT atomic on AVR — always update with cli/sei guard.
+volatile uint16_t g_servoLeftUs  = SERVO_NEUTRAL_US;
+volatile uint16_t g_servoRightUs = SERVO_NEUTRAL_US;
+
+ISR(TIMER2_COMPA_vect) {
+  static uint16_t tick     = 0;
+  static uint16_t leftEnd  = SERVO_NEUTRAL_US / 20;
+  static uint16_t rightEnd = (SERVO_NEUTRAL_US * 2) / 20;
+
+  if (tick == 0) {
+    // Snapshot pulse widths at frame start (convert μs → 20-μs ticks)
+    leftEnd  = g_servoLeftUs  / 20;
+    rightEnd = leftEnd + g_servoRightUs / 20;
+    digitalWrite(SERVO_PIN_LEFT, HIGH);
+  }
+  if (tick == leftEnd) {
+    digitalWrite(SERVO_PIN_LEFT,  LOW);
+    digitalWrite(SERVO_PIN_RIGHT, HIGH);
+  }
+  if (tick == rightEnd) {
+    digitalWrite(SERVO_PIN_RIGHT, LOW);
+  }
+
+  if (++tick >= SERVO_FRAME_TICKS) tick = 0;
+}
 
 // Encoder counts (volatile — modified in ISR)
 volatile long encL = 0;
@@ -326,6 +365,11 @@ void parseSerial() {
     cmdJump    = false;
     posErr = 0.0;
     stopMotors();
+    // Return hips to neutral on emergency stop
+    cli();
+    g_servoLeftUs  = SERVO_NEUTRAL_US;
+    g_servoRightUs = SERVO_NEUTRAL_US;
+    sei();
     Serial.println("STOPPED");
     return;
   }
@@ -350,6 +394,18 @@ void parseSerial() {
     } else if (jmp == 0) {
       cmdJump = false;
     }
+  } else if (line.startsWith("SRV:")) {
+    // Parse SRV:<id>:<pulse_us>   id: 1=left, 2=right
+    int idx1 = line.indexOf(':', 4);
+    if (idx1 < 0) return;
+    int id  = line.substring(4,    idx1).toInt();
+    int us  = line.substring(idx1+1).toInt();
+    us = constrain(us, SERVO_MIN_US, SERVO_MAX_US);
+    cli();
+    if      (id == 1) g_servoLeftUs  = (uint16_t)us;
+    else if (id == 2) g_servoRightUs = (uint16_t)us;
+    sei();
+
   } else if (line.startsWith("TUN:")) {
     // Parse TUN:<Kx>:<Kv>:<Kp>:<Kd>:<Ks>:<balanceOffset>
     int idx1 = line.indexOf(':', 4);
@@ -437,6 +493,19 @@ void setup() {
   
   sei();                      // Re-enable interrupts
 
+
+  // BLS3355 hip servo PWM output pins
+  pinMode(SERVO_PIN_LEFT,  OUTPUT);
+  pinMode(SERVO_PIN_RIGHT, OUTPUT);
+  digitalWrite(SERVO_PIN_LEFT,  LOW);
+  digitalWrite(SERVO_PIN_RIGHT, LOW);
+
+  // Timer 2 CTC mode for 50 Hz servo ISR (20 μs tick)
+  // Prescaler=8, OCR2A=39 → (39+1)*8/16e6 = 20 μs per interrupt
+  TCCR2A = (1 << WGM21);              // CTC mode
+  TCCR2B = (1 << CS21);               // prescaler = 8
+  OCR2A  = 39;
+  TIMSK2 = (1 << OCIE2A);             // enable compare-match ISR
 
   // MPU6050
   mpuInit();

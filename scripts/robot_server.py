@@ -18,23 +18,19 @@ import serial
 import serial.tools.list_ports
 import _bootstrap  # noqa: F401
 
-from src.drivers.feetech_servo import FeetechBus, FeetechServo
-from src.utils.config import load_config, default_feetech_device
+from src.utils.config import load_config
 
 # ── CONFIGURATION ─────────────────────────────────────────────
 SERVER_PORT  = 9898
 SERIAL_BAUD  = 115200
 
-# ── HIP MOTION CONSTANTS ──────────────────────────────────────
-HIP_STEP        = 25    # raw ticks per command  (~2.2° per step)
-HIP_SPEED       = 400   # servo speed  (ticks/sec)
-HIP_ACC         = 25    # servo acceleration
-HIP_MAX_OFFSET  = 500   # max ticks from default pos in either direction (~44°)
-# -1: left servo decreases / right servo increases for a raise command.
-# Both servos were near their mechanical extremes (L:3902, R:151), so +1
-# pushed them into the end-stop and caused overload.  Flip to +1 if the
-# robot moves in the wrong direction.
-HIP_RAISE_DIR   = -1
+# ── HIP MOTION CONSTANTS (BLS3355 PWM, μs units) ─────────────
+# BLS3355 pulse range: 500–2500 μs → 0–270°
+# 1 step = 20 μs ≈ 2.7°  (keeps same coarse feel as old 25-tick Feetech step)
+HIP_STEP_US      = 20    # μs per HIP:UP / HIP:DN command
+HIP_MAX_OFFSET_US = 325  # max μs from default pulse in either direction (~44°)
+# +1: raise = increase pulse width (CW = raise body). Flip to -1 if reversed.
+HIP_RAISE_DIR    = 1
 
 # ── ANSI COLOURS ──────────────────────────────────────────────
 GRN  = '\033[92m'
@@ -74,101 +70,80 @@ def find_arduino_port() -> str | None:
 # ── HIP CONTROLLER ────────────────────────────────────────────
 class HipController:
     """
-    Manages the two Feetech hip servos.
-    step(+1) = raise robot body, step(-1) = lower robot body.
-    Left and right are mechanically mirrored so they move in opposite
-    tick directions for the same physical motion.
+    Controls the two BLS3355 PWM hip servos via SRV: commands on the
+    Arduino serial line.  No separate bus — shares the serial object
+    already opened by RobotServer.
+
+    step(+1) = raise robot body, step(-1) = lower.
+    Both servos share the same pulse width (symmetric mounting).
+    Flip HIP_RAISE_DIR at the top of this file if motion is reversed.
     """
 
-    # Register addresses for overload recovery
-    _ADDR_TORQUE_ENABLE = 40
-    _ADDR_TORQUE_LIMIT  = 34
+    # Pulse width: 500 + (default_pos / 4096) * 2000
+    @staticmethod
+    def _ticks_to_us(ticks: int) -> int:
+        return int(500 + (ticks / 4096) * 2000)
 
-    def __init__(self, cfg: dict):
-        port     = default_feetech_device(cfg)
-        baudrate = cfg["hips"]["baudrate"]
-
-        self.bus = FeetechBus(port=port, baudrate=baudrate)
-        self.bus.open()
+    def __init__(self, ser: serial.Serial, cfg: dict):
+        self._ser = ser
 
         left_cfg  = cfg["hips"]["left"]
         right_cfg = cfg["hips"]["right"]
 
-        self.left  = FeetechServo(self.bus, servo_id=left_cfg["id"])
-        self.right = FeetechServo(self.bus, servo_id=right_cfg["id"])
+        self.left_id  = left_cfg["id"]   # 1
+        self.right_id = right_cfg["id"]  # 2
 
-        self.default_left  = left_cfg["default_pos"]
-        self.default_right = right_cfg["default_pos"]
+        default_left_us  = self._ticks_to_us(left_cfg["default_pos"])
+        default_right_us = self._ticks_to_us(right_cfg["default_pos"])
 
-        # Ensure torque is enabled and any previous overload latch is cleared
-        self._clear_error()
+        self.default_left_us  = default_left_us
+        self.default_right_us = default_right_us
 
-        # Read actual current positions as starting point
-        self.left_pos  = self.left.read_raw_position()
-        self.right_pos = self.right.read_raw_position()
+        # Start at default (neutral) pulse widths
+        self.left_us  = default_left_us
+        self.right_us = default_right_us
+
+        self._send(self.left_id,  self.left_us)
+        self._send(self.right_id, self.right_us)
 
         print(f"{GRN}✓ Hip servos ready{RST}  "
-              f"(L:{self.left_pos} def:{self.default_left}  "
-              f"R:{self.right_pos} def:{self.default_right})")
+              f"(L:{self.left_us}μs  R:{self.right_us}μs)")
 
-    def _clear_error(self):
-        """
-        Toggle torque-enable on both servos to clear any latched overload alarm.
-        Feetech STS servos latch the overload flag until torque is cycled.
-        """
-        for sid in [self.left.servo_id, self.right.servo_id]:
-            try:
-                self.bus.packet.write1ByteTxRx(sid, self._ADDR_TORQUE_ENABLE, 0)
-            except Exception:
-                pass
-        time.sleep(0.05)
-        for sid in [self.left.servo_id, self.right.servo_id]:
-            try:
-                self.bus.packet.write1ByteTxRx(sid, self._ADDR_TORQUE_ENABLE, 1)
-            except Exception:
-                pass
+    def _send(self, servo_id: int, pulse_us: int):
+        pulse_us = max(500, min(2500, pulse_us))
+        try:
+            self._ser.write(f"SRV:{servo_id}:{pulse_us}\n".encode())
+            self._ser.flush()
+        except Exception as e:
+            print(f"{YEL}Hip serial write error: {e}{RST}")
 
     def step(self, direction: int):
-        """
-        direction: +1 = raise, -1 = lower.
-        With HIP_RAISE_DIR = -1:
-          raise → left decreases (3902→3877), right increases (151→176)
-          lower → left increases (3902→3927), right decreases (151→126)
-        Both servos move AWAY from their default end-stop extremes on a raise.
-        Flip HIP_RAISE_DIR at the top of this file if the sense is reversed.
-        """
-        d          = direction * HIP_RAISE_DIR
-        new_left   = int(self.left_pos  + d * HIP_STEP)
-        new_right  = int(self.right_pos - d * HIP_STEP)   # mirrored axis
+        """direction: +1 = raise, -1 = lower."""
+        d = direction * HIP_RAISE_DIR
 
-        # Clamp to ±HIP_MAX_OFFSET from each servo's default position
-        new_left  = max(self.default_left  - HIP_MAX_OFFSET,
-                        min(self.default_left  + HIP_MAX_OFFSET, new_left))
-        new_right = max(self.default_right - HIP_MAX_OFFSET,
-                        min(self.default_right + HIP_MAX_OFFSET, new_right))
+        new_left  = self.left_us  + d * HIP_STEP_US
+        new_right = self.right_us + d * HIP_STEP_US
 
-        for attempt in range(2):
-            try:
-                self.left.set_raw_position(new_left,  HIP_SPEED, HIP_ACC)
-                self.right.set_raw_position(new_right, HIP_SPEED, HIP_ACC)
-                self.left_pos  = new_left
-                self.right_pos = new_right
-                return   # success
-            except IOError as e:
-                if 'Overload' in str(e) and attempt == 0:
-                    # Latch cleared — retry once
-                    print(f"{YEL}Hip overload — clearing alarm and retrying…{RST}")
-                    self._clear_error()
-                    time.sleep(0.1)
-                else:
-                    print(f"{YEL}Hip move error: {e}{RST}")
-                    return
+        # Clamp to ±HIP_MAX_OFFSET_US from each servo's default
+        new_left  = max(self.default_left_us  - HIP_MAX_OFFSET_US,
+                        min(self.default_left_us  + HIP_MAX_OFFSET_US, new_left))
+        new_right = max(self.default_right_us - HIP_MAX_OFFSET_US,
+                        min(self.default_right_us + HIP_MAX_OFFSET_US, new_right))
+
+        self.left_us  = int(new_left)
+        self.right_us = int(new_right)
+        self._send(self.left_id,  self.left_us)
+        self._send(self.right_id, self.right_us)
+
+    def go_default(self):
+        """Return both hips to their configured default position."""
+        self.left_us  = self.default_left_us
+        self.right_us = self.default_right_us
+        self._send(self.left_id,  self.left_us)
+        self._send(self.right_id, self.right_us)
 
     def close(self):
-        try:
-            self.bus.close()
-        except Exception:
-            pass
+        self.go_default()
 
 
 # ── SERVER ────────────────────────────────────────────────────
@@ -195,13 +170,13 @@ class RobotServer:
         self.ser.reset_input_buffer()
         print(f"{GRN}✓ Arduino serial open{RST}")
 
-        # Optional: open Feetech hip servo bus
+        # Initialise BLS hip controller (shares the Arduino serial connection)
         try:
             cfg = load_config()
-            self.hips = HipController(cfg)
+            self.hips = HipController(self.ser, cfg)
         except Exception as e:
-            print(f"{YEL}⚠ Hip servos not available: {e}{RST}")
-            print(f"  (R2/L1 hip buttons will be ignored)")
+            print(f"{YEL}⚠ Hip controller not available: {e}{RST}")
+            print(f"  (hip buttons will be ignored)")
             self.hips = None
 
         self._running = True
@@ -327,7 +302,7 @@ class RobotServer:
 # ── ENTRY POINT ───────────────────────────────────────────────
 def main():
     print(f"\n{BOLD}{'='*58}")
-    print("  JUMPING WHEEL-LEGGED ROBOT — Remote Control Server")
+    print("  WHEEL-LEGGED ROBOT — Remote Control Server")
     print("  UCR MEDDL Lab")
     print(f"{'='*58}{RST}\n")
 

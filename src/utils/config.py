@@ -15,7 +15,10 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     # Transparent compatibility mapper for cleaner robot.yaml layout
     if "arduino" in cfg and "serial" not in cfg:
         cfg["serial"] = cfg["arduino"]
-    if "feetech" in cfg and "hips" not in cfg:
+    # bls takes priority over feetech as the active hip joint config
+    if "bls" in cfg:
+        cfg["hips"] = cfg["bls"]
+    elif "feetech" in cfg and "hips" not in cfg:
         cfg["hips"] = cfg["feetech"]
         
     return cfg
