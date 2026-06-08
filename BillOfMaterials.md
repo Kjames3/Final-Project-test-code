@@ -19,6 +19,8 @@
 | 4x | Jumper Wires (Female-Female) | Used to connect the IMU to the Arduino |
 | 4x | Jumper Wires (Female-Male) | Used to connect the motor controller to the Arduino |
 | 4x | Jumper Wires (Male-Male) | Used to connect the OLED display to the Arduino |
+| 2x | BLS3355 61kg servos | Used for the hips (Replace the Feetech servos, after accidently burning the H-bridge on one of them. This was due to external force preventing the servo from reaching its target position) |
+| 1x | DROK DC Buck Converter 5.3V-32V 12A Adjustable Voltage Step Down Module | Used to step down the voltage from the battery to 8V for the BLS3355 servos |
 
 ## Hardware
 
