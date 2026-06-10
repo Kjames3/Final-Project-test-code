@@ -11,6 +11,7 @@ Usage:
 
 import os
 import sys
+import json
 import socket
 import threading
 import time
@@ -18,11 +19,14 @@ import serial
 import serial.tools.list_ports
 import _bootstrap  # noqa: F401
 
-from src.utils.config import load_config
+from src.utils.config import load_config, stance_pulse_us
 
 # ── CONFIGURATION ─────────────────────────────────────────────
 SERVER_PORT  = 9898
 SERIAL_BAUD  = 115200
+ROOT_DIR     = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+GAINS_FILE   = os.path.join(ROOT_DIR, "config", "lqr_gains.json")
+GAIN_KEYS    = ("kx", "kv", "kp", "kd", "ks", "balance_offset")
 
 # ── HIP MOTION CONSTANTS (BLS3355 PWM, μs units) ─────────────
 # BLS3355 pulse range: 500–2500 μs → 0–270°
@@ -67,6 +71,20 @@ def find_arduino_port() -> str | None:
             pass
     return None
 
+def load_gains() -> dict | None:
+    """Load LQR gains from config/lqr_gains.json. Returns None if missing/invalid."""
+    try:
+        with open(GAINS_FILE) as f:
+            gains = json.load(f)
+        if all(k in gains for k in GAIN_KEYS):
+            return {k: float(gains[k]) for k in GAIN_KEYS}
+        print(f"{YEL}⚠ {GAINS_FILE} is missing keys — ignoring it{RST}")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"{YEL}⚠ Could not read {GAINS_FILE}: {e}{RST}")
+    return None
+
 # ── HIP CONTROLLER ────────────────────────────────────────────
 class HipController:
     """
@@ -79,11 +97,6 @@ class HipController:
     Flip HIP_RAISE_DIR at the top of this file if motion is reversed.
     """
 
-    # Pulse width: 500 + (default_pos / 4096) * 2000
-    @staticmethod
-    def _ticks_to_us(ticks: int) -> int:
-        return int(500 + (ticks / 4096) * 2000)
-
     def __init__(self, ser: serial.Serial, cfg: dict):
         self._ser = ser
 
@@ -93,8 +106,8 @@ class HipController:
         self.left_id  = left_cfg["id"]   # 1
         self.right_id = right_cfg["id"]  # 2
 
-        default_left_us  = self._ticks_to_us(left_cfg["default_pos"])
-        default_right_us = self._ticks_to_us(right_cfg["default_pos"])
+        default_left_us  = stance_pulse_us(left_cfg)
+        default_right_us = stance_pulse_us(right_cfg)
 
         self.default_left_us  = default_left_us
         self.default_right_us = default_right_us
@@ -157,7 +170,7 @@ class RobotServer:
         self.arduino_port = arduino_port
         self.listen_port  = listen_port
         self.ser          = None
-        self.hips         = None   # HipController, or None if Feetech unavailable
+        self.hips         = None   # HipController, or None if hip config unavailable
         self._client_conn = None
         self._client_lock = threading.Lock()
         self._running     = False
@@ -169,6 +182,10 @@ class RobotServer:
         time.sleep(2.0)           # let Arduino reset after DTR toggle
         self.ser.reset_input_buffer()
         print(f"{GRN}✓ Arduino serial open{RST}")
+
+        # Push the tuned LQR gains from config/lqr_gains.json so the firmware
+        # doesn't run on stale compiled-in defaults
+        self._send_gains()
 
         # Initialise BLS hip controller (shares the Arduino serial connection)
         try:
@@ -241,6 +258,36 @@ class RobotServer:
         except Exception:
             pass
 
+    def _send_gains(self):
+        """Send TUN: gains from lqr_gains.json and wait briefly for the ack.
+
+        Runs before the _arduino_to_client thread starts, so reading the
+        serial line here does not race with the forwarder.
+        """
+        gains = load_gains()
+        if gains is None:
+            print(f"{YEL}⚠ No usable {os.path.basename(GAINS_FILE)} — "
+                  f"firmware will run its compiled-in default gains{RST}")
+            return
+
+        cmd = ("TUN:{kx:.4f}:{kv:.4f}:{kp:.4f}:{kd:.4f}:{ks:.4f}"
+               ":{balance_offset:.4f}\n").format(**gains)
+        self._write_arduino(cmd.encode())
+        print(f"→ Sent LQR gains: kx={gains['kx']} kv={gains['kv']} "
+              f"kp={gains['kp']} kd={gains['kd']} ks={gains['ks']} "
+              f"offset={gains['balance_offset']}°")
+
+        deadline = time.time() + 1.5
+        while time.time() < deadline:
+            try:
+                line = self.ser.readline().decode('utf-8', errors='ignore').strip()
+            except Exception:
+                break
+            if line.startswith("TUN_ACK:"):
+                print(f"{GRN}✓ Arduino acknowledged gains: {line}{RST}")
+                return
+        print(f"{YEL}⚠ No TUN_ACK from Arduino — verify gains via telemetry{RST}")
+
     # ── Arduino → client thread ───────────────────────────────
     def _arduino_to_client(self):
         """Forward every line from Arduino to the connected laptop."""
@@ -265,7 +312,7 @@ class RobotServer:
     def _client_to_arduino(self, conn: socket.socket):
         """
         Read command lines from laptop.
-        HIP:UP / HIP:DN are handled here (Feetech bus).
+        HIP:UP / HIP:DN are handled here (BLS hip servos via SRV: commands).
         Everything else is forwarded to the Arduino serial.
         """
         buf = b''

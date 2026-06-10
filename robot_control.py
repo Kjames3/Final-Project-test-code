@@ -331,7 +331,7 @@ def main():
         elif choice == '5':
             launch_dashboard("scripts/tuning_dashboard.py", arduino_port)
         elif choice == '6':
-            launch_script("scripts/set_motor_angle.py", arduino_port, "BLS Servo Diagnostics")
+            launch_script("scripts/bls_servo_diag.py", arduino_port, "BLS Servo Diagnostics")
         elif choice == '7':
             run_diagnostic_telemetry(arduino_port)
         elif choice == '8':

@@ -1,12 +1,17 @@
-"""Command the two hip servos to absolute angles (in radians)."""
+"""Command the two BLS3355 hip servos to absolute angles (in radians).
+
+Angles use the BLSServo convention: 0 rad = mechanical neutral (1500 μs),
+positive toward the CW limit. Pulses are sent as SRV: commands over the
+Arduino serial link (the BLS servos have no separate bus).
+"""
 
 import argparse
 import math
 
 import _bootstrap  # noqa: F401
 
-from src.drivers.feetech_servo import FeetechBus, FeetechServo
-from src.utils.config import default_feetech_device, load_config
+from src.drivers.BLS_servo import BLSBus, BLSServo
+from src.utils.config import default_serial_device, load_config
 
 
 def main():
@@ -18,13 +23,13 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config()
-    port = args.port or default_feetech_device(cfg)
+    port = args.port or default_serial_device(cfg)
 
     left_rad = math.radians(args.left) if args.deg else args.left
     right_rad = math.radians(args.right) if args.deg else args.right
 
-    with FeetechBus(port=port, baudrate=cfg["serial"]["baudrate"]) as bus:
-        left = FeetechServo(
+    with BLSBus(port=port, baudrate=cfg["serial"]["baudrate"]) as bus:
+        left = BLSServo(
             bus,
             servo_id=cfg["hips"]["left"]["id"],
             offset_rad=cfg["hips"]["left"]["offset_rad"],
@@ -32,7 +37,7 @@ def main():
             min_rad=cfg["hips"]["left"]["min_rad"],
             max_rad=cfg["hips"]["left"]["max_rad"],
         )
-        right = FeetechServo(
+        right = BLSServo(
             bus,
             servo_id=cfg["hips"]["right"]["id"],
             offset_rad=cfg["hips"]["right"]["offset_rad"],
@@ -43,7 +48,8 @@ def main():
 
         left.set_angle(left_rad)
         right.set_angle(right_rad)
-        print(f"Commanded: left={left_rad:.4f} rad, right={right_rad:.4f} rad")
+        print(f"Commanded: left={left_rad:.4f} rad ({left.last_pulse_us} μs), "
+              f"right={right_rad:.4f} rad ({right.last_pulse_us} μs)")
 
 
 if __name__ == "__main__":

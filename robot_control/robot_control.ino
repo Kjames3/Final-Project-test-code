@@ -27,7 +27,8 @@
 // ================================================================
 // BEFORE FIRST RUN:
 //   - Calibrate BALANCE_OFFSET so robot stands straight
-//   - Verify hip neutral pulse widths (SERVO_NEUTRAL_US default 1500)
+//   - Set SERVO_BOOT_LEFT_US / SERVO_BOOT_RIGHT_US from the calibrated
+//     stance (must match bls.left/right default_us in config/robot.yaml)
 // ================================================================
 
 #include <Wire.h>
@@ -96,15 +97,20 @@ float balanceOffset = 1.4;
 #define SERVO_NEUTRAL_US  1500
 #define SERVO_FRAME_TICKS 1000   // 20 ms
 
+// Boot/default stance — the pose the hips drive to at power-on and on ESTOP.
+// Keep in sync with bls.left/right default_us in config/robot.yaml.
+#define SERVO_BOOT_LEFT_US   1500   // TODO: set from calibrated stance
+#define SERVO_BOOT_RIGHT_US  1500   // TODO: set from calibrated stance
+
 // Pulse widths commanded by RPi (μs). Written from main loop, read by ISR.
 // uint16_t writes are NOT atomic on AVR — always update with cli/sei guard.
-volatile uint16_t g_servoLeftUs  = SERVO_NEUTRAL_US;
-volatile uint16_t g_servoRightUs = SERVO_NEUTRAL_US;
+volatile uint16_t g_servoLeftUs  = SERVO_BOOT_LEFT_US;
+volatile uint16_t g_servoRightUs = SERVO_BOOT_RIGHT_US;
 
 ISR(TIMER2_COMPA_vect) {
   static uint16_t tick     = 0;
-  static uint16_t leftEnd  = SERVO_NEUTRAL_US / 20;
-  static uint16_t rightEnd = (SERVO_NEUTRAL_US * 2) / 20;
+  static uint16_t leftEnd  = SERVO_BOOT_LEFT_US / 20;
+  static uint16_t rightEnd = (SERVO_BOOT_LEFT_US + SERVO_BOOT_RIGHT_US) / 20;
 
   if (tick == 0) {
     // Snapshot pulse widths at frame start (convert μs → 20-μs ticks)
@@ -365,10 +371,10 @@ void parseSerial() {
     cmdJump    = false;
     posErr = 0.0;
     stopMotors();
-    // Return hips to neutral on emergency stop
+    // Return hips to the boot/default stance on emergency stop
     cli();
-    g_servoLeftUs  = SERVO_NEUTRAL_US;
-    g_servoRightUs = SERVO_NEUTRAL_US;
+    g_servoLeftUs  = SERVO_BOOT_LEFT_US;
+    g_servoRightUs = SERVO_BOOT_RIGHT_US;
     sei();
     Serial.println("STOPPED");
     return;

@@ -13,14 +13,9 @@ import time
 import serial
 import _bootstrap  # noqa: F401
 
-from src.utils.config import load_config, default_serial_device
+from src.utils.config import load_config, default_serial_device, stance_pulse_us
 
 SERIAL_BAUD = 115200
-
-
-def ticks_to_us(ticks: int) -> int:
-    """Convert 0-4095 tick position to 500-2500 μs pulse width."""
-    return int(500 + (ticks / 4096) * 2000)
 
 
 def send_srv(ser: serial.Serial, servo_id: int, pulse_us: int):
@@ -36,8 +31,8 @@ def main():
     left_cfg  = cfg["hips"]["left"]
     right_cfg = cfg["hips"]["right"]
 
-    left_us  = ticks_to_us(left_cfg["default_pos"])
-    right_us = ticks_to_us(right_cfg["default_pos"])
+    left_us  = stance_pulse_us(left_cfg)
+    right_us = stance_pulse_us(right_cfg)
 
     print()
     print("  ===================================================")

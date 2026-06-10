@@ -48,18 +48,20 @@ bls:
   baudrate: 1000000
 
   # Individual joint parameters
-  # default_pos: calibrate by hand after installation — values below are
-  # placeholders matching the old STS defaults until physical calibration.
+  # default_us: stance pulse width in μs (500–2500, 1500 = neutral).
+  # Calibrate by hand after installation, then mirror the calibrated values
+  # into SERVO_BOOT_LEFT_US / SERVO_BOOT_RIGHT_US in robot_control.ino so
+  # the Arduino boots into the same stance.
   left:
     id: 1
-    default_pos: 2048    # TODO: calibrate after installation
+    default_us: 1500     # TODO: calibrate after installation
     offset_rad: 0.0
     direction: 1
     min_rad: -1.5708
     max_rad: 1.5708
   right:
     id: 2
-    default_pos: 2048    # TODO: calibrate after installation
+    default_us: 1500     # TODO: calibrate after installation
     offset_rad: 0.0
     direction: -1
     min_rad: -1.5708
@@ -69,7 +71,7 @@ bls:
 # Governs wheel geometry and encoder configurations for speed averaging.
 wheels:
   encoder_ppr: 660
-  wheel_circumference_m: 0.065
+  wheel_circumference_m: 0.204   # π × 0.065 m diameter (matches firmware WHEEL_CIRC)
   max_speed_pwm: 180
   max_turn_pwm: 80
 
