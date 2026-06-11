@@ -109,13 +109,16 @@ volatile uint16_t g_servoRightUs = SERVO_BOOT_RIGHT_US;
 
 ISR(TIMER2_COMPA_vect) {
   static uint16_t tick     = 0;
-  static uint16_t leftEnd  = SERVO_BOOT_LEFT_US / 20;
-  static uint16_t rightEnd = (SERVO_BOOT_LEFT_US + SERVO_BOOT_RIGHT_US) / 20;
+  static uint16_t leftEnd  = (SERVO_BOOT_LEFT_US + 10) / 20;
+  static uint16_t rightEnd = (SERVO_BOOT_LEFT_US + 10) / 20 + (SERVO_BOOT_RIGHT_US + 10) / 20;
 
   if (tick == 0) {
-    // Snapshot pulse widths at frame start (convert μs → 20-μs ticks)
-    leftEnd  = g_servoLeftUs  / 20;
-    rightEnd = leftEnd + g_servoRightUs / 20;
+    // Snapshot pulse widths at frame start (convert μs → 20-μs ticks).
+    // Round to NEAREST tick (+10 before /20): plain truncation rounds both
+    // pulses down in μs, which is asymmetric about the 1500 μs neutral and
+    // un-mirrors a (1500+x, 1500−x) hip pair by up to a full 20 μs tick.
+    leftEnd  = (g_servoLeftUs  + 10) / 20;
+    rightEnd = leftEnd + (g_servoRightUs + 10) / 20;
     digitalWrite(SERVO_PIN_LEFT, HIGH);
   }
   if (tick == leftEnd) {

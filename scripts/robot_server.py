@@ -93,8 +93,10 @@ class HipController:
     already opened by RobotServer.
 
     step(+1) = raise robot body, step(-1) = lower.
-    Both servos share the same pulse width (symmetric mounting).
-    Flip HIP_RAISE_DIR at the top of this file if motion is reversed.
+    The right servo is mirror-mounted, so raising the body means INCREASING
+    the left pulse and DECREASING the right pulse — per-joint `direction`
+    from config/robot.yaml handles this. Flip HIP_RAISE_DIR at the top of
+    this file if both legs move the wrong way.
     """
 
     def __init__(self, ser: serial.Serial, cfg: dict):
@@ -105,6 +107,9 @@ class HipController:
 
         self.left_id  = left_cfg["id"]   # 1
         self.right_id = right_cfg["id"]  # 2
+
+        self.left_dir  = left_cfg.get("direction", 1)    # +1 = normal
+        self.right_dir = right_cfg.get("direction", -1)  # -1 = mirror-mounted
 
         default_left_us  = stance_pulse_us(left_cfg)
         default_right_us = stance_pulse_us(right_cfg)
@@ -134,8 +139,8 @@ class HipController:
         """direction: +1 = raise, -1 = lower."""
         d = direction * HIP_RAISE_DIR
 
-        new_left  = self.left_us  + d * HIP_STEP_US
-        new_right = self.right_us + d * HIP_STEP_US
+        new_left  = self.left_us  + d * self.left_dir  * HIP_STEP_US
+        new_right = self.right_us + d * self.right_dir * HIP_STEP_US
 
         # Clamp to ±HIP_MAX_OFFSET_US from each servo's default
         new_left  = max(self.default_left_us  - HIP_MAX_OFFSET_US,
