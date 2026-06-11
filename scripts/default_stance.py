@@ -2,7 +2,7 @@
 """
 default_stance.py — Move BLS3355 hip servos to configured default stance.
 
-Sends SRV: commands to the Arduino which generates the PWM signals on D3/D11.
+Sends SRV: commands to the Arduino which generates the PWM signals on D12/D11.
 
 Usage:
     python3 scripts/default_stance.py [arduino_port]

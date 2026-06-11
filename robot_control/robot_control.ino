@@ -99,13 +99,13 @@ float balanceOffset = 1.4;
 
 // Boot/default stance — the pose the hips drive to at power-on and on ESTOP.
 // Keep in sync with bls.left/right default_us in config/robot.yaml.
-// The legs are MIRROR-mounted. Servo-swap test confirmed: the same pulse
-// spins both shafts the same way, which moves the legs in OPPOSITE
-// directions. A PWM servo cannot be reversed electrically, so the right
-// pulse must mirror about neutral:  RIGHT_US = 3000 − LEFT_US.
-// 1540/1460 = both legs +5.4° UP (nearest 20 μs tick to the 5° target).
+// Observed on hardware: the mirrored pulse pair (1540/1460) moved the legs
+// in OPPOSITE directions (left up, right down), which means the same pulse
+// offset moves both legs the SAME way. No mirroring about neutral — both
+// hips get the same pulse.
+// 1540 = both legs +5.4° UP (nearest 20 μs tick to the 5° target).
 #define SERVO_BOOT_LEFT_US   1540   // left leg  +5.4° UP
-#define SERVO_BOOT_RIGHT_US  1460   // right leg +5.4° UP (mirrored: 3000 − 1540)
+#define SERVO_BOOT_RIGHT_US  1540   // right leg +5.4° UP (same pulse, no mirroring)
 
 // Pulse widths commanded by RPi (μs). Written from main loop, read by ISR.
 // uint16_t writes are NOT atomic on AVR — always update with cli/sei guard.

@@ -93,10 +93,11 @@ class HipController:
     already opened by RobotServer.
 
     step(+1) = raise robot body, step(-1) = lower.
-    The legs are mirror-mounted: raising the body means INCREASING the left
-    pulse and DECREASING the right pulse. Per-joint `direction` from
-    config/robot.yaml encodes this (left +1, right -1). Flip HIP_RAISE_DIR
-    at the top of this file if both legs move the wrong way.
+    The same pulse offset moves both legs the same way (verified on
+    hardware: a mirrored 1540/1460 pair moved the legs in opposite
+    directions), so both joints carry `direction: 1` in config/robot.yaml.
+    Flip HIP_RAISE_DIR at the top of this file if both legs move the
+    wrong way.
     """
 
     def __init__(self, ser: serial.Serial, cfg: dict):
@@ -109,7 +110,7 @@ class HipController:
         self.right_id = right_cfg["id"]  # 2
 
         self.left_dir  = left_cfg.get("direction", 1)    # +1 = raise on pulse increase
-        self.right_dir = right_cfg.get("direction", -1)  # -1 = mirror-mounted
+        self.right_dir = right_cfg.get("direction", 1)   # same handedness as left
 
         default_left_us  = stance_pulse_us(left_cfg)
         default_right_us = stance_pulse_us(right_cfg)
