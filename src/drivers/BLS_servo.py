@@ -8,8 +8,8 @@ Control signal: 500–2500 μs pulses at 50 Hz (20 ms frame).
 
 The Arduino generates the physical PWM pulses via a Timer 2 ISR.
 Python sends: SRV:<id>:<pulse_us>\\n  over the existing 115200-baud serial link.
-  id 1 = left hip  (D3 / OC2B on the Arduino)
-  id 2 = right hip (D11 / OC2A on the Arduino)
+  id 1 = left hip  (D12 on the Arduino)
+  id 2 = right hip (D11 on the Arduino)
 
 Hardware:
   Operating voltage : 4.8–8.4 V  (use 2S LiPo, 7.4 V nominal — do NOT exceed 8.4 V)

@@ -4,7 +4,6 @@
 // ================================================================
 // PIN MAP:
 //  D2  - Right encoder B (direction)
-//  D3~ - BLS3355 Left hip servo PWM  (OC2B / Timer 2)  ← NEW
 //  D4  - Left encoder B (direction)
 //  D5~ - AT8236 BIN1  (right motor PWM, Timer 0 OC0B)
 //  D6~ - AT8236 BIN2  (right motor PWM, Timer 0 OC0A)
@@ -12,13 +11,14 @@
 //  D8  - Left encoder A  (interrupt via PCINT0)
 //  D9~ - AT8236 AIN1  (left motor PWM, Timer 1 OC1A)
 //  D10~- AT8236 AIN2  (left motor PWM, Timer 1 OC1B)
-//  D11~- BLS3355 Right hip servo PWM (OC2A / Timer 2) ← NEW
+//  D11~- BLS3355 Right hip servo PWM (bit-banged via Timer 2 ISR)
+//  D12 - BLS3355 Left hip servo PWM  (bit-banged via Timer 2 ISR)
 //  A4  - MPU6050 SDA (I2C)
 //  A5  - MPU6050 SCL (I2C)
 // ================================================================
 // SERVO NOTE: Servo.h cannot be used — it steals Timer 1, which
 //   is needed for analogWrite on D9/D10 (motor control).
-//   Instead, Timer 2 CTC ISR generates 50 Hz servo pulses on D3/D11.
+//   Instead, Timer 2 CTC ISR generates 50 Hz servo pulses on D12/D11.
 //   ISR tick: 20 μs  (prescaler=8, OCR2A=39)
 //   Pulse range: 500–2500 μs (25–125 ticks), frame: 1000 ticks = 20 ms
 // ================================================================
@@ -85,8 +85,8 @@ float balanceOffset = 1.4;
 #define PIN_BIN1        5      // Right Motor PWM Direction 1 (OC0B / Timer 0)
 #define PIN_BIN2        6      // Right Motor PWM Direction 2 (OC0A / Timer 0)
 
-#define SERVO_PIN_LEFT  12      // BLS3355 left hip  (OC2B / Timer 2)
-#define SERVO_PIN_RIGHT 11     // BLS3355 right hip (OC2A / Timer 2)
+#define SERVO_PIN_LEFT  12     // BLS3355 left hip  (bit-banged in Timer 2 ISR)
+#define SERVO_PIN_RIGHT 11     // BLS3355 right hip (bit-banged in Timer 2 ISR)
 
 // ── SERVO PWM (Timer 2 ISR, 20 μs tick) ───────────────────────────
 // Tick period: (OCR2A+1) * prescaler / F_CPU = 40 * 8 / 16e6 = 20 μs
@@ -99,10 +99,13 @@ float balanceOffset = 1.4;
 
 // Boot/default stance — the pose the hips drive to at power-on and on ESTOP.
 // Keep in sync with bls.left/right default_us in config/robot.yaml.
-// Hardware-verified: increasing pulse raises BOTH legs (servos are not
-// mirror-mounted). 1540 = +5.4°, the nearest 20 μs tick to the 5° target.
-#define SERVO_BOOT_LEFT_US   1540   // +5.4° UP
-#define SERVO_BOOT_RIGHT_US  1540   // +5.4° UP (same sense as left)
+// The legs are MIRROR-mounted. Servo-swap test confirmed: the same pulse
+// spins both shafts the same way, which moves the legs in OPPOSITE
+// directions. A PWM servo cannot be reversed electrically, so the right
+// pulse must mirror about neutral:  RIGHT_US = 3000 − LEFT_US.
+// 1540/1460 = both legs +5.4° UP (nearest 20 μs tick to the 5° target).
+#define SERVO_BOOT_LEFT_US   1540   // left leg  +5.4° UP
+#define SERVO_BOOT_RIGHT_US  1460   // right leg +5.4° UP (mirrored: 3000 − 1540)
 
 // Pulse widths commanded by RPi (μs). Written from main loop, read by ISR.
 // uint16_t writes are NOT atomic on AVR — always update with cli/sei guard.
