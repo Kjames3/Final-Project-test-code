@@ -30,8 +30,9 @@ We aim to **emulate the physical results and dynamic control systems** described
 
 Detailed wiring, schematic connections, and Pinout maps are maintained in [Assembly.md](file:///home/kamren/Final-Project-test-code/Assembly.md).
 
-* **Hips (Leg Linkages):** 2x Feetech 12V 30kg Serial Bus Servos (STS3215)
+* **Hips (Leg Linkages):** 2x BLS3355 61kg brushless RC servos (PWM, driven from Arduino D3/D11). *Replaced the original Feetech STS3215 serial-bus servos after a burned H-bridge — see [BillOfMaterials.md](file:///home/kamren/Final-Project-test-code/BillOfMaterials.md).*
 * **Wheels:** 2x JGB-520 12V 550 RPM DC Motors with Hall-effect encoders
+* **Microcontroller:** Arduino Uno R3 (200 Hz LQR balance loop, encoders, IMU, motor + hip PWM)
 * **Controller:** Raspberry Pi (running Pi OS Lite / Bookworm)
 * **Network Status Display:** 1.3" IIC V2.2 OLED (SH1106 driver, 128x64px)
 
@@ -39,26 +40,28 @@ Detailed wiring, schematic connections, and Pinout maps are maintained in [Assem
 
 ## Scripts & Codebase Guide
 
-### 1. `display_ip.py`
-A daemon script that drives the 1.3" I2C OLED screen. It queries the local system for the active Wi-Fi SSID, IP address (`wlan0`), and system hostname, updating the display every 5 seconds.
-* **Why it matters:** Allows team members to quickly check the Pi's IP address upon boot so anybody can SSH in and run scripts without needing to plug in an HDMI monitor or scan the network.
-* **How to run manually:** `python3 display_ip.py`
+The simplest entry point is the unified hub — `python3 robot_control.py` — which auto-detects the Arduino port and launches every test below from a menu. The individual scripts can also be run directly.
+
+### `robot_control.py` (hub)
+The central ANSI-styled console: scans serial ports, shows connection health, and launches wheel tests, the IMU monitor, hip stance, the remote-control server, the web tuning dashboard, BLS servo diagnostics, live telemetry, and pitch-offset calibration.
+
+### `display_ip.py`
+A daemon that drives the 1.3" I2C OLED screen, showing the active Wi-Fi SSID, `wlan0` IP, and hostname so the team can SSH in on boot without an HDMI monitor.
+* **How to run manually:** `python3 scripts/display_ip.py`
 * **Automated start:** Installed as a systemd service (`oled-display.service`).
 
-### 2. `Default_Stance.py`
-Commands the two high-torque Feetech hip joint servos to establish the robot's nominal, ready-to-stand posture.
-* **Safe Transitioning:** Automatically measures the current position of the hip servos. If they are already in stance (`M1 = 3902`, `M2 = 151` ± 80 steps), it locks torque in place. If they need to move, it warns the user and prompts for verification `[y/N]` before executing a slow, controlled direct-path rotation to prevent damaging the parallel four-bar linkage.
-* **How to run:** `python3 Default_Stance.py`
+### `default_stance.py`
+Sends `SRV:` pulse-width commands to the Arduino to drive the two BLS3355 hip servos to the configured default standing stance (`bls.left/right default_us` in `config/robot.yaml`).
+* **How to run:** `python3 scripts/default_stance.py`
 
-### 3. `assign_motor_id.py`
-A utility script used to configure and permanently assign unique serial bus IDs to the Feetech servos (ID `1` for Left, ID `2` for Right).
-* **Fix for ID reset:** Uses EEPROM Lock Register `55` (specific to the Feetech SMS/STS series) to unlock the non-volatile memory, write the new ID, and re-lock it so the ID persists permanently across power cycles.
+### `bls_servo_diag.py`
+Interactive diagnostic for the BLS3355 PWM hip servos: select left/right/both, center, jog by ±20 μs (~2.7°), absolute pulse, or slow sweep — useful for finding and calibrating the neutral/stance pulse widths.
 
-### 4. `read_feetech_status.py`
-Queries the live position and rotational speed of a connected Feetech servo in real time. Extremely useful for verifying correct assembly and mapping physical leg positions to encoder counts.
+### `test_wheels.py`
+Spins the JGB-520 wheel motors forward/backward and streams live encoder speed + tilt telemetry to verify drive wiring and encoder direction.
 
-### 5. `test_jgb_motors.py`
-A basic hardware verification script that spins the wheel DC motors forward and backward via the GPIO hardware pins on the Raspberry Pi.
+### `calibrate_balance_offset.py`
+Averages live IMU pitch while you hold the robot at its true balance point, then writes the result to `config/lqr_gains.json` as `balance_offset`.
 
 ---
 
@@ -70,8 +73,9 @@ On the Raspberry Pi, install all necessary system packages and libraries:
 sudo apt-get update
 sudo apt-get install -y python3-pip python3-pil fonts-dejavu-core i2c-tools
 
-# Install Feetech SDK & Luma OLED package
-pip3 install luma.oled ftservo-python-sdk --break-system-packages
+# Install project Python deps + the Luma OLED package
+pip3 install luma.oled --break-system-packages
+pip3 install -r requirements.txt --break-system-packages
 ```
 
 ### B. Auto-Start the OLED Service

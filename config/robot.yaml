@@ -11,41 +11,14 @@ arduino:
   device_mac: /dev/tty.usbserial
   baudrate: 115200
 
-# ── FEETECH HIGH-TORQUE HIP JOINTS BUS ──────────────────────────────────
-# Manages multi-turn STS series daisy-chained hip joint bus servos.
-# NOTE: STS hardware replaced by BLS3355 — see bls section below.
-#       This block kept for reference; active config is bls:
-feetech:
-  device_linux: /dev/ttyACM0
-  device_win: COM2
-  device_mac: /dev/tty.usbserial2
-  baudrate: 1000000
-
-  # Individual joint parameters
-  left:
-    id: 1
-    default_pos: 3636
-    offset_rad: 0.0
-    direction: 1
-    min_rad: -1.5708
-    max_rad: 1.5708
-  right:
-    id: 2
-    default_pos: 4070
-    offset_rad: 0.0
-    direction: -1
-    min_rad: -1.5708
-    max_rad: 1.5708
-
-# ── BLS3355 BRUSHLESS HIP JOINTS BUS ─────────────────────────────────────
-# Replaces Feetech STS servos. BLS3355: 61 kg·cm, 6.0–8.4 V (2S LiPo).
-# Uses SCS protocol (scscl handler), same baud rate as STS.
+# ── BLS3355 BRUSHLESS HIP JOINTS ─────────────────────────────────────────
+# BLS3355: 61 kg·cm, 6.0–8.4 V (2S LiPo). These are standard RC PWM servos,
+# NOT serial-bus servos — the Arduino generates 50 Hz pulses on D3/D11 and the
+# Pi commands them with SRV:<id>:<pulse_us> over the 115200-baud serial link.
 # IMPORTANT: max supply voltage is 8.4 V — do NOT run on 3S LiPo (12 V).
 bls:
-  device_linux: /dev/ttyACM0
-  device_win: COM2
-  device_mac: /dev/tty.usbserial2
-  baudrate: 1000000
+  # The hips share the Arduino serial link (see the arduino: block above) —
+  # there is no dedicated servo bus, so no device/baudrate keys here.
 
   # Individual joint parameters
   # default_us: stance pulse width in μs (500–2500, 1500 = neutral).

@@ -15,12 +15,10 @@ def load_config(path: Path = CONFIG_PATH) -> dict:
     # Transparent compatibility mapper for cleaner robot.yaml layout
     if "arduino" in cfg and "serial" not in cfg:
         cfg["serial"] = cfg["arduino"]
-    # bls takes priority over feetech as the active hip joint config
+    # bls is the active hip joint config
     if "bls" in cfg:
         cfg["hips"] = cfg["bls"]
-    elif "feetech" in cfg and "hips" not in cfg:
-        cfg["hips"] = cfg["feetech"]
-        
+
     return cfg
 
 
@@ -48,13 +46,3 @@ def default_serial_device(cfg: dict) -> str:
     if sys.platform == "darwin":
         return serial.get("device_mac", "/dev/tty.usbserial")
     return serial.get("device_linux", "/dev/ttyACM0")
-
-
-def default_feetech_device(cfg: dict) -> str:
-    """Return the default system port for the Feetech serial bus."""
-    hips = cfg.get("hips", {})
-    if sys.platform == "win32":
-        return hips.get("device_win", "COM2")
-    if sys.platform == "darwin":
-        return hips.get("device_mac", "/dev/tty.usbserial2")
-    return hips.get("device_linux", "/dev/ttyACM1")
