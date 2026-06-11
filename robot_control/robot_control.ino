@@ -85,7 +85,7 @@ float balanceOffset = 1.4;
 #define PIN_BIN1        5      // Right Motor PWM Direction 1 (OC0B / Timer 0)
 #define PIN_BIN2        6      // Right Motor PWM Direction 2 (OC0A / Timer 0)
 
-#define SERVO_PIN_LEFT  3      // BLS3355 left hip  (OC2B / Timer 2)
+#define SERVO_PIN_LEFT  12      // BLS3355 left hip  (OC2B / Timer 2)
 #define SERVO_PIN_RIGHT 11     // BLS3355 right hip (OC2A / Timer 2)
 
 // ── SERVO PWM (Timer 2 ISR, 20 μs tick) ───────────────────────────
@@ -99,8 +99,8 @@ float balanceOffset = 1.4;
 
 // Boot/default stance — the pose the hips drive to at power-on and on ESTOP.
 // Keep in sync with bls.left/right default_us in config/robot.yaml.
-#define SERVO_BOOT_LEFT_US   1500   // TODO: set from calibrated stance
-#define SERVO_BOOT_RIGHT_US  1500   // TODO: set from calibrated stance
+#define SERVO_BOOT_LEFT_US   1537   // +5° UP (left: pulse > 1500 raises the leg)
+#define SERVO_BOOT_RIGHT_US  1463   // +5° UP (right is mirror-mounted: pulse < 1500 raises)
 
 // Pulse widths commanded by RPi (μs). Written from main loop, read by ISR.
 // uint16_t writes are NOT atomic on AVR — always update with cli/sei guard.

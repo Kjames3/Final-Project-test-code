@@ -27,14 +27,14 @@ bls:
   # the Arduino boots into the same stance.
   left:
     id: 1
-    default_us: 1500     # TODO: calibrate after installation
+    default_us: 1537     # +5° UP — matches SERVO_BOOT_LEFT_US in firmware
     offset_rad: 0.0
     direction: 1
     min_rad: -1.5708
     max_rad: 1.5708
   right:
     id: 2
-    default_us: 1500     # TODO: calibrate after installation
+    default_us: 1463     # +5° UP (mirrored) — matches SERVO_BOOT_RIGHT_US in firmware
     offset_rad: 0.0
     direction: -1
     min_rad: -1.5708
