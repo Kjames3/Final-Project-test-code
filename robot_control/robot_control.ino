@@ -99,8 +99,10 @@ float balanceOffset = 1.4;
 
 // Boot/default stance — the pose the hips drive to at power-on and on ESTOP.
 // Keep in sync with bls.left/right default_us in config/robot.yaml.
-#define SERVO_BOOT_LEFT_US   1537   // +5° UP (left: pulse > 1500 raises the leg)
-#define SERVO_BOOT_RIGHT_US  1463   // +5° UP (right is mirror-mounted: pulse < 1500 raises)
+// Hardware-verified: increasing pulse raises BOTH legs (servos are not
+// mirror-mounted). 1540 = +5.4°, the nearest 20 μs tick to the 5° target.
+#define SERVO_BOOT_LEFT_US   1540   // +5.4° UP
+#define SERVO_BOOT_RIGHT_US  1540   // +5.4° UP (same sense as left)
 
 // Pulse widths commanded by RPi (μs). Written from main loop, read by ISR.
 // uint16_t writes are NOT atomic on AVR — always update with cli/sei guard.

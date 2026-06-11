@@ -25,18 +25,21 @@ bls:
   # Calibrate by hand after installation, then mirror the calibrated values
   # into SERVO_BOOT_LEFT_US / SERVO_BOOT_RIGHT_US in robot_control.ino so
   # the Arduino boots into the same stance.
+  # Hardware-verified: increasing pulse raises BOTH legs — the servos are not
+  # mirror-mounted, so both joints use direction: 1 and the same default_us.
+  # 1540 μs = +5.4°, the nearest 20 μs firmware tick to the 5° standing target.
   left:
     id: 1
-    default_us: 1537     # +5° UP — matches SERVO_BOOT_LEFT_US in firmware
+    default_us: 1540     # +5.4° UP — matches SERVO_BOOT_LEFT_US in firmware
     offset_rad: 0.0
     direction: 1
     min_rad: -1.5708
     max_rad: 1.5708
   right:
     id: 2
-    default_us: 1463     # +5° UP (mirrored) — matches SERVO_BOOT_RIGHT_US in firmware
+    default_us: 1540     # +5.4° UP — matches SERVO_BOOT_RIGHT_US in firmware
     offset_rad: 0.0
-    direction: -1
+    direction: 1
     min_rad: -1.5708
     max_rad: 1.5708
 
