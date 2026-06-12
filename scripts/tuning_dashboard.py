@@ -41,8 +41,8 @@ DEFAULT_GAINS = {
 PARAMETER_SCHEMA = [
     {"id": "kp", "name": "Pitch Gain (Kp)",            "min": 0.0,    "max": 600.0, "step": 1.0,  "desc": "Pitch angle gain (N·m/rad). Higher = stiffer response, too high = oscillations."},
     {"id": "kd", "name": "Pitch-Rate Gain (Kd)",        "min": 0.0,    "max": 200.0, "step": 0.5,  "desc": "Pitch-rate (gyro) damping gain (N·m per rad/s). Higher = smoother response."},
-    {"id": "kv", "name": "Velocity Gain (Kv)",          "min": -150.0, "max": 0.0,   "step": 0.5,  "desc": "Wheel-speed error gain (N·m per m/s). More negative = stronger velocity correction."},
-    {"id": "kx", "name": "Position Gain (Kx)",          "min": -150.0, "max": 0.0,   "step": 0.5,  "desc": "Accumulated position error gain (N·m/m). More negative = stronger position hold."},
+    {"id": "kv", "name": "Velocity Gain (Kv)",          "min": -300.0, "max": 150.0, "step": 0.5,  "desc": "Wheel-speed error gain (N·m per m/s). More negative = stronger velocity correction."},
+    {"id": "kx", "name": "Position Gain (Kx)",          "min": -300.0, "max": 150.0, "step": 0.5,  "desc": "Accumulated position error gain (N·m/m). More negative = stronger position hold."},
     {"id": "ks", "name": "Torque→PWM Scale (Ks)",       "min": 0.0,    "max": 30.0,  "step": 0.1,  "desc": "Maps LQR torque (N·m) to motor PWM. Primary tuning knob for controller authority."},
     {"id": "balance_offset", "name": "Balance Offset (deg)", "min": -10.0, "max": 10.0, "step": 0.1, "desc": "Calibrates the zero tilt angle. Adjust so the robot stands stationary."}
 ]
