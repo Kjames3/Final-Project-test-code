@@ -107,6 +107,15 @@ float balanceOffset = 1.4;
 #define SERVO_BOOT_LEFT_US   1540   // left leg  +5.4° UP
 #define SERVO_BOOT_RIGHT_US  1540   // right leg +5.4° UP (same pulse, no mirroring)
 
+// ── TEMPORARY HIP RAISE/LOWER TEST ────────────────────────────
+// Set SERVO_TEST_MODE to 1 to oscillate both hips up/down about the
+// standing stance (verifies the servos lift and lower the body under
+// load before enabling LQR). Set to 0 to restore normal operation.
+#define SERVO_TEST_MODE      1
+#define SERVO_TEST_CENTER_US SERVO_BOOT_LEFT_US  // oscillate about standing stance (1540)
+#define SERVO_TEST_AMP_US    37    // ≈5° swing  (~7.4 µs/deg on a 270° servo)
+#define SERVO_TEST_PERIOD_MS 2000  // one full up→down→up cycle (ms)
+
 // Pulse widths commanded by RPi (μs). Written from main loop, read by ISR.
 // uint16_t writes are NOT atomic on AVR — always update with cli/sei guard.
 volatile uint16_t g_servoLeftUs  = SERVO_BOOT_LEFT_US;
@@ -550,6 +559,22 @@ void loop() {
   float dt = (now - prevLoopUs) / 1000000.0;
   prevLoopUs = now;
   dt = constrain(dt, 0.001, 0.05);  // Safety clamp
+
+  // ── TEMPORARY: hip raise/lower test ─────────────────────────
+  // Smoothly sweeps both hips ±5° about the standing stance so we can
+  // watch the body rise and lower and confirm the servos carry the
+  // load before switching to LQR. Wheels stay off; serial/LQR skipped.
+#if SERVO_TEST_MODE
+  float ph    = (millis() % SERVO_TEST_PERIOD_MS) / (float)SERVO_TEST_PERIOD_MS;
+  float testUs = SERVO_TEST_CENTER_US + SERVO_TEST_AMP_US * sin(ph * 2.0 * PI);
+  uint16_t testPulse = (uint16_t)constrain(testUs, SERVO_MIN_US, SERVO_MAX_US);
+  cli();
+  g_servoLeftUs  = testPulse;
+  g_servoRightUs = testPulse;
+  sei();
+  stopMotors();   // keep wheels off — hips only
+  return;         // skip serial + balance loop while testing
+#endif
 
   // Always parse serial so START / ESTOP are responsive
   parseSerial();
