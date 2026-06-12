@@ -259,11 +259,14 @@ void mpuRead() {
 // ── ANGLE CALCULATION (Complementary Filter) ──────────────────
 // Returns angle in degrees. 0 = upright, + = leaning forward
 void updateAngle(float dt) {
-  // Accelerometer angle (X-axis tilt)
-  float accelAngle = atan2((float)ay, (float)az) * 57.2958;
+  // Pitch (fall) axis is the IMU Y axis: rotation about Y tilts the X-Z
+  // plane, so the accel angle comes from ax/az and the rate from gy.
+  float accelAngle = atan2((float)ax, (float)az) * 57.2958;
 
-  // Gyro rate (X-axis rotation rate in deg/s)
-  tiltRate = (float)gx / 131.0;  // 131 LSB/deg/s for ±250°/s
+  // Gyro rate (Y-axis rotation rate in deg/s).
+  // If the complementary filter drifts or fights itself (tiltAngle and the
+  // accel angle diverge when you tilt), flip the sign to -gy.
+  tiltRate = (float)gy / 131.0;  // 131 LSB/deg/s for ±250°/s
 
   // Complementary filter
   tiltAngle = CF_ALPHA * (tiltAngle + tiltRate * dt) +
@@ -540,13 +543,16 @@ void setup() {
   // Read MPU many times so complementary filter converges
   for (int i = 0; i < 200; i++) {
     mpuRead();
-    float accelAngle = atan2((float)ay, (float)az) * 57.2958;
+    float accelAngle = atan2((float)ax, (float)az) * 57.2958;  // Y-axis pitch
     tiltAngle = 0.8 * tiltAngle + 0.2 * accelAngle;
     delay(5);
   }
 
 
 
+  // Build banner — printed once on boot/reset so you can confirm a flash
+  // actually took. If you DON'T see this line, the chip has stale firmware.
+  Serial.println("FW: y-axis-pitch (rate=gy, angle=atan2(ax,az))");
   Serial.println("READY");
 
   prevLoopUs = micros();
