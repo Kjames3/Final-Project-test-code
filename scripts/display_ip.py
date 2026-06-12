@@ -17,6 +17,9 @@ import socket
 import subprocess
 import _bootstrap  # noqa: F401
 
+import serial
+import serial.tools.list_ports
+
 from PIL import Image, ImageDraw, ImageFont
 from luma.core.interface.serial import i2c
 from luma.oled.device import sh1106
@@ -24,7 +27,18 @@ from luma.oled.device import sh1106
 # ─── Configuration ────────────────────────────────────────────────────────────
 I2C_PORT    = 1        # /dev/i2c-1  (standard on Pi 2/3/4/5)
 I2C_ADDRESS = 0x3C     # Most 1.3" SH1106 boards use 0x3C; try 0x3D if blank
-REFRESH_SEC = 5        # How often to refresh the display (seconds)
+REFRESH_SEC = 5        # How often to refresh the idle display (seconds)
+
+# ─── Arduino → OLED status ────────────────────────────────────────────────────
+# The Arduino prints lines like "OLED:Standing"; we show the text after the
+# prefix on the screen. NOTE: only ONE process can own the serial port at a
+# time — don't run the robot hub/robot_server.py on the same port while this is
+# reading it (set SERIAL_ENABLE=False here, or stop this service, when you do).
+SERIAL_ENABLE   = True       # read the Arduino and show its OLED: messages
+SERIAL_PORT     = None       # None = auto-detect (ttyACM*/ttyUSB*)
+SERIAL_BAUD     = 115200     # must match Serial.begin() in robot_control.ino
+OLED_PREFIX     = "OLED:"    # serial lines starting with this are shown verbatim
+SHOW_IP_ON_IDLE = False      # True = fall back to the IP/SSID screen until a msg arrives
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -86,6 +100,38 @@ def get_hostname() -> str:
         return "raspberrypi"
 
 
+def find_arduino_port():
+    """Auto-detect the Arduino serial port (same heuristic as ArduinoBridge)."""
+    try:
+        for p in serial.tools.list_ports.comports():
+            blob = f"{p.description} {p.hwid}".lower()
+            if any(k in blob for k in ("arduino", "uno", "ch340", "usb serial", "ttyacm", "ttyusb")):
+                return p.device
+    except Exception:
+        pass
+    for fb in ("/dev/ttyACM0", "/dev/ttyACM1", "/dev/ttyUSB0", "/dev/ttyUSB1"):
+        if os.path.exists(fb):
+            return fb
+    return None
+
+
+def open_serial():
+    """Open the Arduino serial port, or return None if unavailable/owned elsewhere."""
+    if not SERIAL_ENABLE:
+        return None
+    port = SERIAL_PORT or find_arduino_port()
+    if not port:
+        print("[OLED] No Arduino serial port found — showing idle screen.")
+        return None
+    try:
+        ser = serial.Serial(port, SERIAL_BAUD, timeout=0)  # non-blocking reads
+        print(f"[OLED] Reading Arduino status on {port} @ {SERIAL_BAUD} baud")
+        return ser
+    except Exception as e:
+        print(f"[OLED] Could not open {port} ({e}) — is the hub/robot_server using it?")
+        return None
+
+
 def load_font(size: int) -> ImageFont.FreeTypeFont:
     """Try to load DejaVu; fall back to the PIL default bitmap font."""
     font_candidates = [
@@ -136,29 +182,103 @@ def draw_screen(device, hostname: str, ssid: str, ip: str) -> None:
         device.display(img)
 
 
+def draw_message(device, message: str) -> None:
+    """Render an Arduino status message (word-wrapped) onto the OLED."""
+    width, height = device.width, device.height   # 128 × 64
+
+    with Image.new("1", (width, height), 0) as img:
+        draw = ImageDraw.Draw(img)
+
+        # Header bar
+        draw.rectangle([(0, 0), (width - 1, 13)], fill=1)
+        draw.text((2, 1), "ROBOT STATUS", font=load_font(11), fill=0)
+
+        # Word-wrap the message body to fit the 128px width
+        font = load_font(14)
+        lines, cur = [], ""
+        for word in message.split():
+            trial = (cur + " " + word).strip()
+            if draw.textlength(trial, font=font) <= width - 4:
+                cur = trial
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = word
+        if cur:
+            lines.append(cur)
+
+        y = 22
+        for ln in lines[:3]:           # up to 3 lines fit under the header
+            draw.text((2, y), ln, font=font, fill=1)
+            y += 15
+
+        device.display(img)
+
+
 def main() -> None:
-    print("[OLED] Starting display_ip service …")
+    print("[OLED] Starting display service …")
 
     # Initialise the I2C OLED
-    serial = i2c(port=I2C_PORT, address=I2C_ADDRESS)
-    device = sh1106(serial)
-
+    serial_oled = i2c(port=I2C_PORT, address=I2C_ADDRESS)
+    device = sh1106(serial_oled)
     print(f"[OLED] Device ready — {device.width}×{device.height}px on I2C-{I2C_PORT} @ 0x{I2C_ADDRESS:02X}")
 
+    ser          = open_serial()
+    last_message = None      # most recent Arduino "OLED:" text
+    last_idle    = 0.0       # timestamp of last idle redraw
+    buf          = ""        # serial line-assembly buffer
+
+    def draw_idle():
+        if SHOW_IP_ON_IDLE:
+            draw_screen(device, get_hostname(), get_wifi_ssid(), get_ip_address("wlan0"))
+        elif last_message is not None:
+            draw_message(device, last_message)
+        else:
+            draw_message(device, "Waiting for Arduino")
+
     try:
+        draw_idle()
         while True:
-            hostname = get_hostname()
-            ssid     = get_wifi_ssid()
-            ip       = get_ip_address("wlan0")
+            got_message = False
 
-            print(f"[OLED] host={hostname}  ssid={ssid}  ip={ip}")
-            draw_screen(device, hostname, ssid, ip)
+            # Drain any pending serial bytes and assemble complete lines
+            if ser is not None:
+                try:
+                    if ser.in_waiting:
+                        buf += ser.read(ser.in_waiting).decode("utf-8", errors="ignore")
+                    while "\n" in buf:
+                        line, buf = buf.split("\n", 1)
+                        line = line.strip()
+                        if line.startswith(OLED_PREFIX):
+                            last_message = line[len(OLED_PREFIX):].strip()
+                            got_message = True
+                except Exception as e:
+                    print(f"[OLED] Serial read error ({e}); will retry.")
+                    try:
+                        ser.close()
+                    except Exception:
+                        pass
+                    ser = None
 
-            time.sleep(REFRESH_SEC)
+            if got_message and last_message is not None:
+                print(f"[OLED] msg: {last_message}")
+                draw_message(device, last_message)
+            elif (time.time() - last_idle) >= REFRESH_SEC:
+                draw_idle()
+                last_idle = time.time()
+                if ser is None and SERIAL_ENABLE:   # throttled reconnect attempt
+                    ser = open_serial()
+
+            time.sleep(0.05)
 
     except KeyboardInterrupt:
         print("\n[OLED] Interrupted — clearing display.")
     finally:
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:
+                pass
         device.clear()
         device.hide()
 

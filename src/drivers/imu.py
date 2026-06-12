@@ -33,11 +33,10 @@ class IMUTelemetry:
         else:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=0.1)
             time.sleep(2.0)  # Wait for Arduino bootloader
-            try:
-                self.ser.write(b"START\n")
-                self.ser.flush()
-            except Exception:
-                pass
+            # NOTE: deliberately do NOT send START here. The firmware now streams
+            # telemetry even while disarmed, so read-only tools (calibration, IMU
+            # monitor) receive data with the MOTORS OFF. Tools that actually drive
+            # (e.g. test_wheels.py) send their own START explicitly.
 
         self.running = True
         self.thread = threading.Thread(target=self._reader_loop, daemon=True)

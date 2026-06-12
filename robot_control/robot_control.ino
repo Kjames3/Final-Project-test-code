@@ -110,11 +110,13 @@ float balanceOffset = 1.4;
 // ── TEMPORARY HIP RAISE/LOWER TEST ────────────────────────────
 // Set SERVO_TEST_MODE to 1 to oscillate both hips up/down about the
 // standing stance (verifies the servos lift and lower the body under
-// load before enabling LQR). Set to 0 to restore normal operation.
-#define SERVO_TEST_MODE      1
+// load before enabling LQR). Set to 0 to restore normal operation
+// (robot just holds the standing stance). Kept the ±20° sweep settings
+// below so it can be re-enabled instantly.
+#define SERVO_TEST_MODE      0
 #define SERVO_TEST_CENTER_US SERVO_BOOT_LEFT_US  // oscillate about standing stance (1540)
-#define SERVO_TEST_AMP_US    37    // ≈5° swing  (~7.4 µs/deg on a 270° servo)
-#define SERVO_TEST_PERIOD_MS 2000  // one full up→down→up cycle (ms)
+#define SERVO_TEST_AMP_US    148   // ≈20° swing  (~7.4 µs/deg on a 270° servo)
+#define SERVO_TEST_PERIOD_MS 1000  // one full up→down→up cycle (ms) — 2× faster
 
 // Pulse widths commanded by RPi (μs). Written from main loop, read by ISR.
 // uint16_t writes are NOT atomic on AVR — always update with cli/sei guard.
@@ -379,6 +381,7 @@ void parseSerial() {
     cmdJump    = false;
     running    = true;
     Serial.println("RUNNING");
+    sendOled("Balancing");
     return;
   }
 
@@ -394,6 +397,7 @@ void parseSerial() {
     g_servoRightUs = SERVO_BOOT_RIGHT_US;
     sei();
     Serial.println("STOPPED");
+    sendOled("E-STOP");
     return;
   }
 
@@ -483,6 +487,14 @@ void sendTelemetry() {
   Serial.println((float)gz / 131.0, 2);    // gyro Z (°/s)
 }
 
+// ── SEND A STATUS MESSAGE TO THE RPi OLED ─────────────────────
+// The Pi's display_ip.py prints any serial line starting with "OLED:"
+// onto the 1.3" OLED. Keep messages short (~14 chars/line, 3 lines max).
+void sendOled(const char* msg) {
+  Serial.print("OLED:");
+  Serial.println(msg);
+}
+
 // ── SETUP ─────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);  // USB serial to RPi
@@ -546,6 +558,7 @@ void setup() {
 
 
   Serial.println("READY");
+  sendOled("Standing");
 
   prevLoopUs = micros();
   prevSpeedMs = millis();
@@ -566,11 +579,17 @@ void loop() {
   // load before switching to LQR. Wheels stay off; serial/LQR skipped.
 #if SERVO_TEST_MODE
   float ph    = (millis() % SERVO_TEST_PERIOD_MS) / (float)SERVO_TEST_PERIOD_MS;
-  float testUs = SERVO_TEST_CENTER_US + SERVO_TEST_AMP_US * sin(ph * 2.0 * PI);
-  uint16_t testPulse = (uint16_t)constrain(testUs, SERVO_MIN_US, SERVO_MAX_US);
+  float delta = SERVO_TEST_AMP_US * sin(ph * 2.0 * PI);
+  // Hips are mirror-mounted: an EQUAL pulse spins both servos the same way,
+  // lifting one leg and dropping the other (body rocks side-to-side).
+  // Mirror the right pulse about the stance (left +delta, right -delta) so
+  // the servos counter-rotate and both legs raise/lower the body together.
+  // If the body still moves the wrong way, swap the +/- signs below.
+  uint16_t leftPulse  = (uint16_t)constrain(SERVO_TEST_CENTER_US + delta, SERVO_MIN_US, SERVO_MAX_US);
+  uint16_t rightPulse = (uint16_t)constrain(SERVO_TEST_CENTER_US - delta, SERVO_MIN_US, SERVO_MAX_US);
   cli();
-  g_servoLeftUs  = testPulse;
-  g_servoRightUs = testPulse;
+  g_servoLeftUs  = leftPulse;
+  g_servoRightUs = rightPulse;
   sei();
   stopMotors();   // keep wheels off — hips only
   return;         // skip serial + balance loop while testing
@@ -579,9 +598,19 @@ void loop() {
   // Always parse serial so START / ESTOP are responsive
   parseSerial();
 
-  // Hold idle until armed by RPi
+  // Hold idle until armed by RPi. Motors stay OFF, but we still read the IMU
+  // and stream telemetry so the calibration / IMU-monitor tools work safely
+  // while DISARMED (no wheels driving). Speed state is kept fresh so arming
+  // doesn't produce a stale velocity spike.
   if (!running) {
     stopMotors();
+    mpuRead();
+    updateAngle(dt);
+    updateSpeed(dt);
+    if ((millis() - prevSerialMs) >= 50) {
+      sendTelemetry();
+      prevSerialMs = millis();
+    }
     if ((millis() - prevReadyMs) >= 1000) {
       Serial.println("READY");
       prevReadyMs = millis();
