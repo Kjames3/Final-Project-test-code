@@ -333,9 +333,12 @@ int balanceControl(float dt) {
   posErr += velErr * dt;
   posErr  = constrain(posErr, -0.5, 0.5);
 
-  // Angle states in SI radians so the offline-solved K applies verbatim
-  float pitch     = (tiltAngle - balanceOffset) * 0.0174533;  // deg → rad
-  float pitchRate = tiltRate                    * 0.0174533;  // deg/s → rad/s
+  // Angle states in SI radians so the offline-solved K applies verbatim.
+  // Sign NEGATED: the Y-axis IMU convention reads pitch opposite to the
+  // wheel/motor frame, so a forward lean must command a forward (catching)
+  // drive. pitch and pitchRate flip together so Kd stays damping.
+  float pitch     = -(tiltAngle - balanceOffset) * 0.0174533;  // deg → rad
+  float pitchRate = -tiltRate                    * 0.0174533;  // deg/s → rad/s
 
   // LQR state feedback → wheel torque (N·m), scaled to motor PWM
   float tau  = Kx * posErr + Kv * velErr + Kp * pitch + Kd * pitchRate;
@@ -552,7 +555,7 @@ void setup() {
 
   // Build banner — printed once on boot/reset so you can confirm a flash
   // actually took. If you DON'T see this line, the chip has stale firmware.
-  Serial.println("FW: y-axis-pitch (rate=gy, angle=atan2(ax,az))");
+  Serial.println("FW: y-axis-pitch, sign-fixed (rate=gy, angle=atan2(ax,az))");
   Serial.println("READY");
 
   prevLoopUs = micros();
