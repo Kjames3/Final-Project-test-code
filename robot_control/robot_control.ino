@@ -183,7 +183,6 @@ unsigned long prevLoopUs   = 0;
 unsigned long prevSpeedMs  = 0;
 unsigned long prevSerialMs = 0;
 unsigned long prevReadyMs  = 0;
-unsigned long prevLegMs    = 0;   // hip-angle → OLED stream
 
 // ── ENCODER ISRs (Hardware Pin Change Interrupts) ─────────────
 // Left Encoder ISR triggers on Pin 8 change (Port B, PCINT0)
@@ -382,7 +381,6 @@ void parseSerial() {
     cmdJump    = false;
     running    = true;
     Serial.println("RUNNING");
-    sendOled("Balancing");
     return;
   }
 
@@ -398,7 +396,6 @@ void parseSerial() {
     g_servoRightUs = SERVO_BOOT_RIGHT_US;
     sei();
     Serial.println("STOPPED");
-    sendOled("E-STOP");
     return;
   }
 
@@ -488,28 +485,6 @@ void sendTelemetry() {
   Serial.println((float)gz / 131.0, 2);    // gyro Z (°/s)
 }
 
-// ── SEND A STATUS MESSAGE TO THE RPi OLED ─────────────────────
-// The Pi's display_ip.py prints any serial line starting with "OLED:"
-// onto the 1.3" OLED. Keep messages short (~14 chars/line, 3 lines max).
-void sendOled(const char* msg) {
-  Serial.print("OLED:");
-  Serial.println(msg);
-}
-
-// ── SEND COMMANDED HIP/LEG ANGLE TO THE RPi OLED ──────────────
-// Reports the commanded hip-servo angle in degrees relative to the
-// 1500 µs neutral (~7.4 µs/deg, i.e. 0.135 deg/µs). The Pi's
-// display_ip.py shows these as the live L/R leg-angle readout.
-// Format: "LEG:<leftDeg>:<rightDeg>"
-void sendLegAngles() {
-  float lDeg = ((int)g_servoLeftUs  - 1500) * 0.135;
-  float rDeg = ((int)g_servoRightUs - 1500) * 0.135;
-  Serial.print("LEG:");
-  Serial.print(lDeg, 1);
-  Serial.print(":");
-  Serial.println(rDeg, 1);
-}
-
 // ── SETUP ─────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);  // USB serial to RPi
@@ -573,7 +548,6 @@ void setup() {
 
 
   Serial.println("READY");
-  sendOled("Standing");
 
   prevLoopUs = micros();
   prevSpeedMs = millis();
@@ -612,12 +586,6 @@ void loop() {
 
   // Always parse serial so START / ESTOP are responsive
   parseSerial();
-
-  // Stream the commanded hip/leg angle to the Pi OLED at ~5 Hz (armed or not)
-  if ((millis() - prevLegMs) >= 200) {
-    sendLegAngles();
-    prevLegMs = millis();
-  }
 
   // Hold idle until armed by RPi. Motors stay OFF, but we still read the IMU
   // and stream telemetry so the calibration / IMU-monitor tools work safely
