@@ -107,8 +107,8 @@ float balanceOffset = 1.4;
 // offset moves both legs the SAME way. No mirroring about neutral — both
 // hips get the same pulse.
 // 1580 = both legs +10.8° (≈10° target — nearest 20 μs tick). Lower stance.
-#define SERVO_BOOT_LEFT_US   1600   // left leg  ≈+10° (lower stance)
-#define SERVO_BOOT_RIGHT_US  1600   // right leg ≈+10° (same pulse, no mirroring)
+#define SERVO_BOOT_LEFT_US   1540   // left leg  ≈+10° (lower stance)
+#define SERVO_BOOT_RIGHT_US  1540   // right leg ≈+10° (same pulse, no mirroring)
 
 // ── TEMPORARY HIP RAISE/LOWER TEST ────────────────────────────
 // Set SERVO_TEST_MODE to 1 to oscillate both hips up/down about the
