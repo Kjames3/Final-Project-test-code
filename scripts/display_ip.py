@@ -34,11 +34,11 @@ REFRESH_SEC = 5        # How often to refresh the idle display (seconds)
 # prefix on the screen. NOTE: only ONE process can own the serial port at a
 # time — don't run the robot hub/robot_server.py on the same port while this is
 # reading it (set SERIAL_ENABLE=False here, or stop this service, when you do).
-SERIAL_ENABLE   = True       # read the Arduino and show its OLED: messages
+SERIAL_ENABLE   = True       # read the Arduino and show its status
 SERIAL_PORT     = None       # None = auto-detect (ttyACM*/ttyUSB*)
 SERIAL_BAUD     = 115200     # must match Serial.begin() in robot_control.ino
-OLED_PREFIX     = "OLED:"    # serial lines starting with this are shown verbatim
-SHOW_IP_ON_IDLE = False      # True = fall back to the IP/SSID screen until a msg arrives
+LEG_PREFIX      = "LEG:"     # "LEG:<leftDeg>:<rightDeg>" — live hip/leg angle
+OLED_PREFIX     = "OLED:"    # "OLED:<text>" — short status strings (unused on screen now)
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -182,35 +182,32 @@ def draw_screen(device, hostname: str, ssid: str, ip: str) -> None:
         device.display(img)
 
 
-def draw_message(device, message: str) -> None:
-    """Render an Arduino status message (word-wrapped) onto the OLED."""
+def draw_status(device, hostname: str, ip: str,
+                left: float, right: float, have_leg: bool) -> None:
+    """Render hostname + IP address + live hip/leg angles onto the OLED."""
     width, height = device.width, device.height   # 128 × 64
 
     with Image.new("1", (width, height), 0) as img:
         draw = ImageDraw.Draw(img)
 
-        # Header bar
+        # Header bar — hostname (handy for SSH)
         draw.rectangle([(0, 0), (width - 1, 13)], fill=1)
-        draw.text((2, 1), "ROBOT STATUS", font=load_font(11), fill=0)
+        hn = hostname if len(hostname) <= 18 else hostname[:17] + "…"
+        draw.text((2, 1), hn, font=load_font(11), fill=0)
 
-        # Word-wrap the message body to fit the 128px width
-        font = load_font(14)
-        lines, cur = [], ""
-        for word in message.split():
-            trial = (cur + " " + word).strip()
-            if draw.textlength(trial, font=font) <= width - 4:
-                cur = trial
-            else:
-                if cur:
-                    lines.append(cur)
-                cur = word
-        if cur:
-            lines.append(cur)
+        # IP address
+        draw.text((2, 16), f"IP:{ip}", font=load_font(11), fill=1)
 
-        y = 22
-        for ln in lines[:3]:           # up to 3 lines fit under the header
-            draw.text((2, y), ln, font=font, fill=1)
-            y += 15
+        # Divider
+        draw.line([(0, 30), (width - 1, 30)], fill=1)
+
+        # Hip/leg angle — degrees relative to the neutral stance
+        if have_leg:
+            font = load_font(14)
+            draw.text((2, 33), f"L:{left:+5.1f}°",  font=font, fill=1)
+            draw.text((2, 48), f"R:{right:+5.1f}°", font=font, fill=1)
+        else:
+            draw.text((2, 38), "Legs: waiting…", font=load_font(11), fill=1)
 
         device.display(img)
 
@@ -223,25 +220,38 @@ def main() -> None:
     device = sh1106(serial_oled)
     print(f"[OLED] Device ready — {device.width}×{device.height}px on I2C-{I2C_PORT} @ 0x{I2C_ADDRESS:02X}")
 
-    ser          = open_serial()
-    last_message = None      # most recent Arduino "OLED:" text
-    last_idle    = 0.0       # timestamp of last idle redraw
-    buf          = ""        # serial line-assembly buffer
+    ser       = open_serial()
+    buf       = ""                  # serial line-assembly buffer
+    leg_l     = None                # latest commanded hip angles (deg, vs neutral)
+    leg_r     = None
+    hostname  = get_hostname()
+    ip        = get_ip_address("wlan0")
+    last_net  = time.time()         # last network-info refresh
+    drawn     = None                # last rendered key, to avoid needless redraws
 
-    def draw_idle():
-        if SHOW_IP_ON_IDLE:
-            draw_screen(device, get_hostname(), get_wifi_ssid(), get_ip_address("wlan0"))
-        elif last_message is not None:
-            draw_message(device, last_message)
-        else:
-            draw_message(device, "Waiting for Arduino")
+    def redraw():
+        nonlocal drawn
+        have_leg = leg_l is not None and leg_r is not None
+        l = leg_l if have_leg else 0.0
+        r = leg_r if have_leg else 0.0
+        key = (hostname, ip, round(l, 1), round(r, 1), have_leg)
+        if key != drawn:
+            draw_status(device, hostname, ip, l, r, have_leg)
+            drawn = key
 
     try:
-        draw_idle()
+        redraw()
         while True:
-            got_message = False
+            # Refresh network info every REFRESH_SEC (these subprocess calls are slow)
+            if (time.time() - last_net) >= REFRESH_SEC:
+                hostname = get_hostname()
+                ip       = get_ip_address("wlan0")
+                last_net = time.time()
+                if ser is None and SERIAL_ENABLE:   # throttled reconnect attempt
+                    ser = open_serial()
+                redraw()
 
-            # Drain any pending serial bytes and assemble complete lines
+            # Drain serial and pick up the latest LEG: hip-angle reading
             if ser is not None:
                 try:
                     if ser.in_waiting:
@@ -249,9 +259,15 @@ def main() -> None:
                     while "\n" in buf:
                         line, buf = buf.split("\n", 1)
                         line = line.strip()
-                        if line.startswith(OLED_PREFIX):
-                            last_message = line[len(OLED_PREFIX):].strip()
-                            got_message = True
+                        if line.startswith(LEG_PREFIX):
+                            parts = line[len(LEG_PREFIX):].split(":")
+                            if len(parts) >= 2:
+                                try:
+                                    leg_l = float(parts[0])
+                                    leg_r = float(parts[1])
+                                    redraw()
+                                except ValueError:
+                                    pass
                 except Exception as e:
                     print(f"[OLED] Serial read error ({e}); will retry.")
                     try:
@@ -259,15 +275,6 @@ def main() -> None:
                     except Exception:
                         pass
                     ser = None
-
-            if got_message and last_message is not None:
-                print(f"[OLED] msg: {last_message}")
-                draw_message(device, last_message)
-            elif (time.time() - last_idle) >= REFRESH_SEC:
-                draw_idle()
-                last_idle = time.time()
-                if ser is None and SERIAL_ENABLE:   # throttled reconnect attempt
-                    ser = open_serial()
 
             time.sleep(0.05)
 
