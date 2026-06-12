@@ -745,19 +745,26 @@
             });
         }
 
-        async function fetchGains() {
+        // applyToInputs=true sets the slider/number fields from the server's
+        // active gains — used ONLY on first load and right after a save.
+        // The periodic refresh calls it with false so it only updates the
+        // acknowledged values + Synced/Pending badges; otherwise it would
+        // overwrite whatever the user is editing every cycle (the snap-back bug).
+        async function fetchGains(applyToInputs = true) {
             try {
                 const res = await fetch('/api/gains');
                 const data = await res.json();
-                currentGains = data.active;
                 acknowledgedGains = data.acknowledged;
-                Object.keys(currentGains).forEach(k => {
-                    const s = document.getElementById(`slide-${k}`);
-                    const n = document.getElementById(`num-${k}`);
-                    if (s) s.value = currentGains[k];
-                    if (n) n.value = currentGains[k];
-                    updateBadge(k);
-                });
+                if (applyToInputs) {
+                    currentGains = data.active;
+                    Object.keys(currentGains).forEach(k => {
+                        const s = document.getElementById(`slide-${k}`);
+                        const n = document.getElementById(`num-${k}`);
+                        if (s) s.value = currentGains[k];
+                        if (n) n.value = currentGains[k];
+                    });
+                }
+                Object.keys(currentGains).forEach(updateBadge);
             } catch (err) { console.error('Gains load failed:', err); }
         }
 
@@ -847,10 +854,11 @@
                 jumpEl.style.color = d.jumping ? 'var(--accent)' : 'var(--muted)';
 
                 acknowledgedGains = {
-                    kp_angle: d.ack_kp_angle,
-                    kd_angle: d.ack_kd_angle,
-                    kp_speed: d.ack_kp_speed,
-                    ki_speed: d.ack_ki_speed,
+                    kx: d.ack_kx,
+                    kv: d.ack_kv,
+                    kp: d.ack_kp,
+                    kd: d.ack_kd,
+                    ks: d.ack_ks,
                     balance_offset: d.ack_balance_offset
                 };
                 Object.keys(currentGains).forEach(updateBadge);
@@ -969,7 +977,7 @@
         window.addEventListener('DOMContentLoaded', () => {
             fetchSchema();
             setInterval(pollTelemetry, 100);
-            setInterval(fetchGains, 1500);
+            setInterval(() => fetchGains(false), 1500);   // refresh badges only — don't clobber edits
             setInterval(pollAutoTune, 500); // Poll status at 2 Hz
         });
     </script>

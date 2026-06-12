@@ -43,7 +43,10 @@ float Kx =  -63.2456;   // position-error gain  (N·m/m)
 float Kv =  -71.8334;   // velocity-error gain  (N·m per m/s)
 float Kp =  345.3348;   // pitch gain           (N·m/rad)
 float Kd =   82.7683;   // pitch-rate gain      (N·m per rad/s)
-float Ks =    7.8;      // torque→PWM scalar    (PWM per N·m) — TUNE ON HARDWARE
+float Ks =    3.0;      // torque→PWM scalar (PWM per N·m) — TUNE ON HARDWARE.
+                        // Lowered from 7.8: at 7.8 the output saturated at only
+                        // ~5.4° tilt (bang-bang, overshoots). 3.0 saturates near
+                        // ~14°, keeping the LQR in its linear/damped range.
 
 // Tilt offset (degrees) — tune so robot stands upright without moving
 // Positive = robot leans forward, Negative = leans back
