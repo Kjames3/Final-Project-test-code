@@ -106,9 +106,9 @@ float balanceOffset = 1.4;
 // in OPPOSITE directions (left up, right down), which means the same pulse
 // offset moves both legs the SAME way. No mirroring about neutral — both
 // hips get the same pulse.
-// 1540 = both legs +5.4° UP (nearest 20 μs tick to the 5° target).
-#define SERVO_BOOT_LEFT_US   1540   // left leg  +5.4° UP
-#define SERVO_BOOT_RIGHT_US  1540   // right leg +5.4° UP (same pulse, no mirroring)
+// 1580 = both legs +10.8° (≈10° target — nearest 20 μs tick). Lower stance.
+#define SERVO_BOOT_LEFT_US   1540   // left leg  ≈+10° (lower stance)
+#define SERVO_BOOT_RIGHT_US  1540   // right leg ≈+10° (same pulse, no mirroring)
 
 // ── TEMPORARY HIP RAISE/LOWER TEST ────────────────────────────
 // Set SERVO_TEST_MODE to 1 to oscillate both hips up/down about the
@@ -117,7 +117,7 @@ float balanceOffset = 1.4;
 // (robot just holds the standing stance). Kept the ±20° sweep settings
 // below so it can be re-enabled instantly.
 #define SERVO_TEST_MODE      0
-#define SERVO_TEST_CENTER_US SERVO_BOOT_LEFT_US  // oscillate about standing stance (1540)
+#define SERVO_TEST_CENTER_US SERVO_BOOT_LEFT_US  // oscillate about standing stance (1580)
 #define SERVO_TEST_AMP_US    148   // ≈20° swing  (~7.4 µs/deg on a 270° servo)
 #define SERVO_TEST_PERIOD_MS 1000  // one full up→down→up cycle (ms) — 2× faster
 

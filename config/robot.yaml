@@ -28,17 +28,17 @@ bls:
   # Observed on hardware: a mirrored pulse pair (1540/1460) moved the legs in
   # OPPOSITE directions, so the same pulse offset moves both legs the SAME
   # way. Both hips get the same pulse and the same direction multiplier.
-  # 1540 = both legs +5.4° UP, the nearest firmware tick to the 5° target.
+  # 1580 = both legs ≈+10.8° (≈10° target, nearest firmware tick) — lower stance.
   left:
     id: 1
-    default_us: 1540     # left leg +5.4° UP — matches SERVO_BOOT_LEFT_US
+    default_us: 1580     # left leg ≈+10° (lower stance) — matches SERVO_BOOT_LEFT_US
     offset_rad: 0.0
     direction: 1
     min_rad: -1.5708
     max_rad: 1.5708
   right:
     id: 2
-    default_us: 1540     # right leg +5.4° UP (same pulse) — matches SERVO_BOOT_RIGHT_US
+    default_us: 1580     # right leg ≈+10° (lower stance) — matches SERVO_BOOT_RIGHT_US
     offset_rad: 0.0
     direction: 1
     min_rad: -1.5708
