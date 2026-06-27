@@ -6,7 +6,7 @@ to suggest optimal hyperparameters (e.g. LQR gains) that minimize a performance 
 
 import math
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 
 def solve_linear(A: List[List[float]], b: List[float]) -> List[float]:
@@ -149,8 +149,12 @@ class BayesianOptimizer:
         grid_dim = 12
         candidates: List[Tuple[float, ...]] = []
         
-        # Symmetrical grid generation for 2D bounds
-        if len(self.keys) == 2:
+        # Symmetrical grid generation for 1D and 2D bounds
+        if len(self.keys) == 1:
+            # Uniformly spaced 1D grid for single-parameter search (higher accuracy)
+            for i in range(100):
+                candidates.append((i / 99.0,))
+        elif len(self.keys) == 2:
             for i in range(grid_dim):
                 for j in range(grid_dim):
                     candidates.append((i / (grid_dim - 1), j / (grid_dim - 1)))

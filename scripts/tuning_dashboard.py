@@ -132,6 +132,8 @@ autotune_state = {
     "trials": []            # list of tested iterations
 }
 
+autotune_session_id = ""
+
 def log_msg(msg: str, level: str = "info"):
     timestamp = time.strftime("%H:%M:%S")
     prefix = ""
@@ -176,7 +178,9 @@ def register_trial_result(iteration: int, ks: float, cost: float, status: str):
         })
 
 def save_trial_log_to_disk(iteration: int, ks: float, cost: float, samples: list, status: str):
-    logs_dir = os.path.join(CONFIG_DIR, "autotune_logs")
+    global autotune_session_id
+    session_folder = autotune_session_id if autotune_session_id else "default_session"
+    logs_dir = os.path.join(CONFIG_DIR, "autotune_logs", session_folder)
     os.makedirs(logs_dir, exist_ok=True)
     filepath = os.path.join(logs_dir, f"trial_{iteration}.json")
     try:
@@ -273,14 +277,9 @@ def run_autotune_loop():
             
         time.sleep(0.8)  # Wait for transient adjustment
         
-        # Inject drive disturbance tap
-        # NOTE: speed=20 (~0.12 m/s) is intentionally gentle — large values cause
-        # the robot to travel too far in the 120 ms window and saturate the PWM,
-        # making cost measurements meaningless.
-        log_msg("Injecting disturbance tap (wheel speed impulse)...")
-        bridge.send_command(speed=20, turn=0, jump=0)
-        time.sleep(0.12)
-        bridge.send_command(speed=0, turn=0, jump=0)
+        log_msg("Injecting disturbance tap (hardware-timed wheel speed impulse)...")
+        bridge.send_impulse(speed=20, duration_ms=120)
+        time.sleep(0.15)  # Wait for impulse to finish on hardware
         
         # Sensor Logging Loop at 20 Hz (duration = 1.8 seconds)
         log_msg("Logging sensor telemetry streams...")
@@ -319,9 +318,11 @@ def run_autotune_loop():
             status_lbl = "FALLEN"
             bridge.send_estop()  # Stop motors immediately
         else:
-            # Quadratic cost index over the logged samples
-            cost_tilt = sum(sample["tilt_angle"]**2 for sample in samples)
-            cost_speed = sum(sample["wheel_speed_cms"]**2 for sample in samples)
+            # Offset-independent variance cost over the logged samples
+            tilt_mean = sum(sample["tilt_angle"] for sample in samples) / len(samples)
+            speed_mean = sum(sample["wheel_speed_cms"] for sample in samples) / len(samples)
+            cost_tilt = sum((sample["tilt_angle"] - tilt_mean)**2 for sample in samples)
+            cost_speed = sum((sample["wheel_speed_cms"] - speed_mean)**2 for sample in samples)
             cost = round((cost_tilt + 0.08 * cost_speed) / max(1, len(samples)), 2)
             status_lbl = "SUCCESS"
             
@@ -473,11 +474,12 @@ def send_control():
 
 @app.route('/api/autotune/start', methods=['POST'])
 def start_autotune():
-    global autotune_state
+    global autotune_state, autotune_session_id
     with autotune_lock:
         if autotune_state["status"] == "running":
             return jsonify({"status": "error", "message": "Auto-tuning is already running."}), 400
             
+        autotune_session_id = time.strftime("run_%Y%m%d_%H%M%S")
         # Reset state
         autotune_state = {
             "status": "running",

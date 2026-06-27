@@ -251,6 +251,30 @@ class ArduinoBridge:
                     self._is_connected = False
                 return False
 
+    def send_impulse(self, speed: int, duration_ms: int) -> bool:
+        """Send a timed disturbance impulse command to the Arduino.
+        
+        Args:
+            speed: Forward/Backward speed (-255 to 255)
+            duration_ms: Duration of impulse in milliseconds (10 to 5000)
+        """
+        speed = max(-255, min(255, int(speed)))
+        duration_ms = max(10, min(5000, int(duration_ms)))
+        if not self.is_connected():
+            return False
+        cmd = f"IMP:{speed}:{duration_ms}\n"
+        with self._write_lock:
+            if self.ser is None or not self.ser.is_open:
+                return False
+            try:
+                self.ser.write(cmd.encode('utf-8'))
+                self.ser.flush()
+                return True
+            except Exception:
+                with self._state_lock:
+                    self._is_connected = False
+                return False
+
     def get_telemetry(self) -> Dict:
         """Return a snapshot of the current telemetry values."""
         with self._state_lock:
