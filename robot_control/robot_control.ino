@@ -70,6 +70,9 @@ float balanceOffset = 1.4;
 // Complementary filter coefficient (0.95-0.99)
 #define CF_ALPHA        0.98
 
+// Motor deadband compensation (stiction threshold)
+#define MOTOR_DEADBAND  25
+
 // MPU6050 I2C address
 #define MPU_ADDR        0x68
 
@@ -168,10 +171,21 @@ float posErr       = 0.0;   // integral of velocity error = position-error state
 long  prevEncL     = 0;
 long  prevEncR     = 0;
 
+float gyroBiasY         = 0.0; // Gyro zero-rate bias on Y-axis
+float prevSpeedAvg      = 0.0; // Last avg speed for derivative tracking
+float axleAccel         = 0.0; // Estimated linear acceleration (m/s^2)
+float filteredAxleAccel = 0.0; // Low-pass filtered axle acceleration
+
 // Controller commands (received from RPi over serial)
 int   cmdSpeed     = 0;     // -255 to 255 (forward/backward)
 int   cmdTurn      = 0;     // -255 to 255 (left/right)
 bool  cmdJump      = false;
+
+// Timed impulse disturbance variables
+unsigned long impulseStartMs = 0;
+unsigned long impulseDurationMs = 0;
+int impulseSpeed = 0;
+bool impulseActive = false;
 
 // State flags
 bool  fallen       = false;
@@ -262,14 +276,22 @@ void mpuRead() {
 // ── ANGLE CALCULATION (Complementary Filter) ──────────────────
 // Returns angle in degrees. 0 = upright, + = leaning forward
 void updateAngle(float dt) {
-  // Pitch (fall) axis is the IMU Y axis: rotation about Y tilts the X-Z
-  // plane, so the accel angle comes from ax/az and the rate from gy.
-  float accelAngle = atan2((float)ax, (float)az) * 57.2958;
+  // Compute axle linear acceleration (speedAvg derivative)
+  axleAccel = (speedAvg - prevSpeedAvg) / dt;
+  prevSpeedAvg = speedAvg;
 
-  // Gyro rate (Y-axis rotation rate in deg/s).
-  // If the complementary filter drifts or fights itself (tiltAngle and the
-  // accel angle diverge when you tilt), flip the sign to -gy.
-  tiltRate = (float)gy / 131.0;  // 131 LSB/deg/s for ±250°/s
+  // Low-pass filter to reject high-frequency encoder noise
+  filteredAxleAccel = 0.8 * filteredAxleAccel + 0.2 * axleAccel;
+
+  // Convert raw ax to g's, subtract axle acceleration, convert back
+  float ax_g = (float)ax / 16384.0;
+  float ax_compensated = ax_g - (filteredAxleAccel / 9.81);
+
+  // Pitch (fall) angle calculation (rotation about Y axis)
+  float accelAngle = atan2(ax_compensated, (float)az / 16384.0) * 57.2958;
+
+  // Gyro rate (Y-axis rotation rate in deg/s), corrected with calibrated bias
+  tiltRate = (float)(gy - gyroBiasY) / 131.0;
 
   // Complementary filter
   tiltAngle = CF_ALPHA * (tiltAngle + tiltRate * dt) +
@@ -277,7 +299,16 @@ void updateAngle(float dt) {
 }
 
 // ── MOTOR CONTROL (Yahboom YB-MNT03-v1.0 TB6612 Dual PWM Mode) ──
+int applyDeadband(int pwm) {
+  if (pwm > 0) return map(pwm, 0, 255, MOTOR_DEADBAND, 255);
+  if (pwm < 0) return map(pwm, -255, 0, -255, -MOTOR_DEADBAND);
+  return 0;
+}
+
 void setMotors(int leftPWM, int rightPWM) {
+  leftPWM = applyDeadband(leftPWM);
+  rightPWM = applyDeadband(rightPWM);
+
   // Left motor (Channel A) — Pin 9 (AIN1) and Pin 10 (AIN2)
   if (leftPWM > 0) {
     digitalWrite(PIN_AIN1, LOW);
@@ -333,8 +364,12 @@ int balanceControl(float dt) {
   float velErr  = speedAvg - vTarget;
 
   // Position-error state = integral of velocity error, with anti-windup clamp
-  posErr += velErr * dt;
-  posErr  = constrain(posErr, -0.5, 0.5);
+  if (cmdSpeed != 0) {
+    posErr *= 0.95; // decay the accumulator during active driving
+  } else {
+    posErr += velErr * dt;
+    posErr  = constrain(posErr, -0.5, 0.5);
+  }
 
   // Angle states in SI radians so the offline-solved K applies verbatim.
   // Sign NEGATED: the Y-axis IMU convention reads pitch opposite to the
@@ -368,103 +403,108 @@ void updateJump() {
   }
 }
 
-// ── SERIAL COMMAND PARSER ─────────────────────────────────────
-// Protocol from RPi:
-//   "START\n"                                          — arm the robot
-//   "ESTOP\n"                                          — emergency stop, disarm
-//   "CMD:<speed>:<turn>:<jump>\n"                      — motion command
-//   "TUN:<Kx>:<Kv>:<Kp>:<Kd>:<Ks>:<balanceOffset>\n"   — set LQR gains
-void parseSerial() {
-  if (!Serial.available()) return;
+// ── TIMED IMPULSE DISTURBANCE FUNCTIONS ───────────────────────
+void startImpulse(int speed, int durationMs) {
+  impulseSpeed = constrain(speed, -255, 255);
+  impulseDurationMs = durationMs;
+  impulseStartMs = millis();
+  impulseActive = true;
+  cmdSpeed = impulseSpeed; // apply speed setpoint immediately
+}
 
-  String line = Serial.readStringUntil('\n');
-  line.trim();
-
-  if (line == "START") {
-    // Reset control state for a clean start
-    posErr = 0.0;
-    fallen     = false;
-    jumping    = false;
-    cmdSpeed   = 0;
-    cmdTurn    = 0;
-    cmdJump    = false;
-    running    = true;
-    Serial.println("RUNNING");
-    return;
+void updateImpulse() {
+  if (!impulseActive) return;
+  if (millis() - impulseStartMs >= impulseDurationMs) {
+    impulseActive = false;
+    cmdSpeed = 0; // reset speed setpoint to zero
   }
+}
 
-  if (line == "ESTOP") {
-    running    = false;
-    jumping    = false;
-    cmdJump    = false;
+// ── SERIAL COMMAND PARSER (C-string non-allocating process) ──
+void processCommand(char* buf) {
+  if (strcmp(buf, "START") == 0) {
+    posErr = 0.0;
+    fallen = false;
+    jumping = false;
+    cmdSpeed = 0;
+    cmdTurn = 0;
+    cmdJump = false;
+    running = true;
+    Serial.println("RUNNING");
+  } else if (strcmp(buf, "ESTOP") == 0) {
+    running = false;
+    jumping = false;
+    cmdJump = false;
+    impulseActive = false;
     posErr = 0.0;
     stopMotors();
-    // Return hips to the boot/default stance on emergency stop
     cli();
     g_servoLeftUs  = SERVO_BOOT_LEFT_US;
     g_servoRightUs = SERVO_BOOT_RIGHT_US;
     sei();
     Serial.println("STOPPED");
-    return;
-  }
-
-  if (line.startsWith("CMD:")) {
-    // Parse CMD:<speed>:<turn>:<jump>
-    int idx1 = line.indexOf(':', 4);
-    int idx2 = line.indexOf(':', idx1 + 1);
-
-    if (idx1 < 0 || idx2 < 0) return;
-
-    int spd  = line.substring(4,    idx1).toInt();
-    int turn = line.substring(idx1+1, idx2).toInt();
-    int jmp  = line.substring(idx2+1).toInt();
-
-    cmdSpeed = constrain(spd,  -255, 255);
-    cmdTurn  = constrain(turn, -255, 255);
-
-    if (jmp == 1 && !cmdJump) {
-      cmdJump = true;
-      startJump();
-    } else if (jmp == 0) {
-      cmdJump = false;
+  } else if (strncmp(buf, "CMD:", 4) == 0) {
+    int spd, turn, jmp;
+    if (sscanf(buf + 4, "%d:%d:%d", &spd, &turn, &jmp) == 3) {
+      cmdSpeed = constrain(spd, -255, 255);
+      cmdTurn = constrain(turn, -255, 255);
+      if (jmp == 1 && !cmdJump) {
+        cmdJump = true;
+        startJump();
+      } else if (jmp == 0) {
+        cmdJump = false;
+      }
     }
-  } else if (line.startsWith("SRV:")) {
-    // Parse SRV:<id>:<pulse_us>   id: 1=left, 2=right
-    int idx1 = line.indexOf(':', 4);
-    if (idx1 < 0) return;
-    int id  = line.substring(4,    idx1).toInt();
-    int us  = line.substring(idx1+1).toInt();
-    us = constrain(us, SERVO_MIN_US, SERVO_MAX_US);
-    cli();
-    if      (id == 1) g_servoLeftUs  = (uint16_t)us;
-    else if (id == 2) g_servoRightUs = (uint16_t)us;
-    sei();
+  } else if (strncmp(buf, "IMP:", 4) == 0) {
+    int spd, dur;
+    if (sscanf(buf + 4, "%d:%d", &spd, &dur) == 2) {
+      startImpulse(spd, dur);
+    }
+  } else if (strncmp(buf, "SRV:", 4) == 0) {
+    int id, us;
+    if (sscanf(buf + 4, "%d:%d", &id, &us) == 2) {
+      us = constrain(us, SERVO_MIN_US, SERVO_MAX_US);
+      cli();
+      if      (id == 1) g_servoLeftUs  = (uint16_t)us;
+      else if (id == 2) g_servoRightUs = (uint16_t)us;
+      sei();
+    }
+  } else if (strncmp(buf, "TUN:", 4) == 0) {
+    float kx_val, kv_val, kp_val, kd_val, ks_val, bo_val;
+    if (sscanf(buf + 4, "%f:%f:%f:%f:%f:%f", &kx_val, &kv_val, &kp_val, &kd_val, &ks_val, &bo_val) == 6) {
+      Kx = kx_val;
+      Kv = kv_val;
+      Kp = kp_val;
+      Kd = kd_val;
+      Ks = ks_val;
+      balanceOffset = bo_val;
+      
+      Serial.print("TUN_ACK:");
+      Serial.print(Kx, 4); Serial.print(":");
+      Serial.print(Kv, 4); Serial.print(":");
+      Serial.print(Kp, 4); Serial.print(":");
+      Serial.print(Kd, 4); Serial.print(":");
+      Serial.print(Ks, 4); Serial.print(":");
+      Serial.println(balanceOffset, 4);
+    }
+  }
+}
 
-  } else if (line.startsWith("TUN:")) {
-    // Parse TUN:<Kx>:<Kv>:<Kp>:<Kd>:<Ks>:<balanceOffset>
-    int idx1 = line.indexOf(':', 4);
-    int idx2 = line.indexOf(':', idx1 + 1);
-    int idx3 = line.indexOf(':', idx2 + 1);
-    int idx4 = line.indexOf(':', idx3 + 1);
-    int idx5 = line.indexOf(':', idx4 + 1);
-
-    if (idx1 < 0 || idx2 < 0 || idx3 < 0 || idx4 < 0 || idx5 < 0) return;
-
-    Kx = line.substring(4,      idx1).toFloat();
-    Kv = line.substring(idx1+1, idx2).toFloat();
-    Kp = line.substring(idx2+1, idx3).toFloat();
-    Kd = line.substring(idx3+1, idx4).toFloat();
-    Ks = line.substring(idx4+1, idx5).toFloat();
-    balanceOffset = line.substring(idx5+1).toFloat();
-
-    // Send confirmation back
-    Serial.print("TUN_ACK:");
-    Serial.print(Kx, 4); Serial.print(":");
-    Serial.print(Kv, 4); Serial.print(":");
-    Serial.print(Kp, 4); Serial.print(":");
-    Serial.print(Kd, 4); Serial.print(":");
-    Serial.print(Ks, 4); Serial.print(":");
-    Serial.println(balanceOffset, 4);
+void parseSerial() {
+  static char serialBuffer[64];
+  static byte idx = 0;
+  
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n') {
+      serialBuffer[idx] = '\0';
+      processCommand(serialBuffer);
+      idx = 0;
+    } else if (idx < sizeof(serialBuffer) - 1) {
+      if (c != '\r') {
+        serialBuffer[idx++] = c;
+      }
+    }
   }
 }
 
@@ -545,11 +585,24 @@ void setup() {
   mpuInit();
   delay(100);
 
+  // Calibrate Gyro Bias Y (average 400 readings while stationary)
+  Serial.println("CALIBRATING GYRO...");
+  long gyroSum = 0;
+  for (int i = 0; i < 400; i++) {
+    mpuRead();
+    gyroSum += gy;
+    delay(3);
+  }
+  gyroBiasY = (float)gyroSum / 400.0;
+  Serial.print("GYRO BIAS Y: "); Serial.println(gyroBiasY);
+
   // Warm up angle filter (let it settle for 1 second)
   // Read MPU many times so complementary filter converges
   for (int i = 0; i < 200; i++) {
     mpuRead();
-    float accelAngle = atan2((float)ax, (float)az) * 57.2958;  // Y-axis pitch
+    // Convert raw ax to g's, subtract calibration bias, and calculate pitch angle
+    float ax_g = (float)ax / 16384.0;
+    float accelAngle = atan2(ax_g, (float)az / 16384.0) * 57.2958;
     tiltAngle = 0.8 * tiltAngle + 0.2 * accelAngle;
     delay(5);
   }
@@ -605,6 +658,7 @@ void loop() {
   // doesn't produce a stale velocity spike.
   if (!running) {
     stopMotors();
+    impulseActive = false;
     mpuRead();
     updateAngle(dt);
     updateSpeed(dt);
@@ -637,6 +691,9 @@ void loop() {
 
   // 4. Update jump state machine
   updateJump();
+
+  // Update timed impulse disturbance
+  updateImpulse();
 
   // 5. Compute and apply motor control (only if not fallen)
   if (!fallen) {
